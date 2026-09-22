@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.local/
+*.log
+coverage/
+docs/PRODUCT_PLAN.md
+docs/DELIVERY_PLAN.md
+docs/FIRST_RELEASE.md
