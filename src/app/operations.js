@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 11;
+export const RELEASE = 12;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -23,7 +23,7 @@ export function extendWorkspace(state) {
     'Согласовать смету', 'Согласовать договор', 'Получить предоплату', 'Запланировать выезд на объект',
     'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
   ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
-  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments']) state[key] ??= [];
+  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds']) state[key] ??= [];
   return state;
 }
 export const documentTypes = { receipt: 'Приход', issue: 'Выдача', return: 'Возврат', writeoff: 'Списание', direct: 'Покупка на объект' };
@@ -53,6 +53,17 @@ export function applyOperation(state, action, payload) {
     const previous = state.suppliers.find((s) => s.id === payload.id);
     const supplier = { id: previous?.id || id(), name: required(payload.name, 'поставщик'), contact: String(payload.contact || '').slice(0, 500), notes: String(payload.notes || '').slice(0, 2000) };
     if (previous) Object.assign(previous, supplier); else state.suppliers.push(supplier);
+  } else if (action === 'need.save') {
+    const previous = state.supplyNeeds.find((item) => item.id === payload.id);
+    if (!['tool', 'consumable', 'equipment', 'other'].includes(payload.kind)) throw new Error('Выберите вид потребности');
+    if (!['production', 'tp'].includes(payload.destination)) throw new Error('Выберите подразделение');
+    if (!['normal', 'high', 'urgent'].includes(payload.priority)) throw new Error('Выберите приоритет');
+    if (!['requested', 'approved', 'ordered', 'received', 'cancelled'].includes(payload.status)) throw new Error('Выберите статус');
+    const links = (Array.isArray(payload.links) ? payload.links : []).map((value) => String(value || '').trim()).filter(Boolean);
+    if (links.length > 10) throw new Error('Можно добавить не больше 10 ссылок');
+    for (const value of links) { let url; try { url = new URL(value); } catch { throw new Error('Проверьте ссылки на товары'); } if (!['http:', 'https:'].includes(url.protocol) || value.length > 2000) throw new Error('Разрешены только ссылки http и https'); }
+    const item = { id: previous?.id || id(), name: required(payload.name, 'потребность').slice(0, 300), kind: payload.kind, destination: payload.destination, quantity: num(payload.quantity, 0.01, 1e6), unit: required(payload.unit, 'единица').slice(0, 50), priority: payload.priority, status: payload.status, neededBy: payload.neededBy ? validDay(payload.neededBy) : '', requestedBy: String(payload.requestedBy || '').slice(0, 200), links, note: String(payload.note || '').slice(0, 2000), createdAt: previous?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    if (previous) Object.assign(previous, item); else state.supplyNeeds.unshift(item);
   } else if (action === 'purchase.create') {
     if (!state.suppliers.some((s) => s.id === payload.supplierId)) throw new Error('Выберите поставщика');
     state.purchases.push({ id: id(), number: `ЗК-${String(state.purchases.length + 1).padStart(4, '0')}`, date: validDay(payload.date), dueDate: payload.dueDate ? validDay(payload.dueDate) : '', supplierId: payload.supplierId, lines: linesFrom(state, payload.lines), note: String(payload.note || '').slice(0, 2000), createdAt: new Date().toISOString() });
@@ -122,7 +133,7 @@ export function applyOperation(state, action, payload) {
   return true;
 }
 export function validateOperations(state) {
-  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates', 'clientActions', 'attachments']) {
+  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates', 'clientActions', 'attachments', 'supplyNeeds']) {
     const rows = state[table];
     if (!Array.isArray(rows) || rows.length > 20000 || rows.some((r) => !r || typeof r.id !== 'string' || !r.id) || new Set(rows.map((r) => r.id)).size !== rows.length) throw new Error(`Некорректный раздел: ${table}`);
   }
@@ -147,4 +158,8 @@ export function validateOperations(state) {
   for (const t of state.taskTemplates) if (![t.title,t.unit,t.description].every(str) || !Array.isArray(t.checklist) || t.checklist.some((s) => !str(s)) || typeof t.active !== 'boolean') throw new Error('Некорректный шаблон действия');
   for (const item of state.clientActions) if (!str(item.title) || typeof item.active !== 'boolean') throw new Error('Некорректный список действий с клиентом');
   for (const item of state.attachments) if (!has('sites', item.siteId) || ![item.name,item.type,item.dataUrl,item.note,item.createdAt,item.authorId].every((v) => typeof v === 'string') || item.dataUrl.length > 1_100_000 || !Number.isFinite(item.size) || item.size < 1 || item.size > 800000 || Number.isNaN(Date.parse(item.createdAt))) throw new Error('Некорректное вложение клиента');
+  for (const item of state.supplyNeeds) {
+    if (![item.name,item.kind,item.destination,item.unit,item.priority,item.status,item.neededBy,item.requestedBy,item.note,item.createdAt,item.updatedAt].every(str) || !['tool','consumable','equipment','other'].includes(item.kind) || !['production','tp'].includes(item.destination) || !['normal','high','urgent'].includes(item.priority) || !['requested','approved','ordered','received','cancelled'].includes(item.status) || !Array.isArray(item.links) || item.links.length > 10 || item.links.some((link) => !str(link) || !/^https?:\/\//i.test(link))) throw new Error('Некорректная потребность снабжения');
+    num(item.quantity, 0.01, 1e6); if (item.neededBy) validDay(item.neededBy); if (Number.isNaN(Date.parse(item.createdAt)) || Number.isNaN(Date.parse(item.updatedAt))) throw new Error('Некорректная дата потребности');
+  }
 }

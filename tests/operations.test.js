@@ -56,3 +56,9 @@ test('карточка клиента хранит настраиваемые д
   assert.equal(s.attachments.length,1);assert.equal(s.attachments[0].siteId,'site-1');validateState(s);
   assert.throws(()=>applyCommand(s,'attachment.add',{siteId:'missing',name:'x.txt',type:'text/plain',size:3,dataUrl:'data:text/plain;base64,QQ=='}),/Объект/);
 });
+test('потребность снабжения хранит несколько безопасных ссылок и меняет статус',()=>{
+  let s=applyCommand(createDemoState(),'need.save',{name:'Диски для циркулярной пилы',kind:'consumable',destination:'production',quantity:5,unit:'шт',priority:'urgent',status:'requested',neededBy:'2026-09-30',requestedBy:'Сотрудник 01',links:['https://example.com/disk-1','https://shop.example/disk-2'],note:'Для участка раскроя'});
+  const need=s.supplyNeeds[0];assert.equal(need.links.length,2);assert.equal(need.priority,'urgent');
+  s=applyCommand(s,'need.save',{...need,status:'ordered'});assert.equal(s.supplyNeeds[0].status,'ordered');validateState(s);
+  assert.throws(()=>applyCommand(s,'need.save',{...need,id:'',links:['javascript:alert(1)']}),/http/);
+});
