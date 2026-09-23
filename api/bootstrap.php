@@ -188,6 +188,7 @@ function crm_public_employee(array $row, bool $includeFinance): array {
         'department' => $row['department'],
         'phone' => $row['phone'],
         'email' => $row['email'],
+        'avatarKey' => $row['avatar_key'],
         'attendanceMode' => $row['attendance_mode'],
         'active' => (bool)$row['active'],
         'notes' => $row['notes'],

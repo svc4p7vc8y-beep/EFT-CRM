@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS crm_employees (
   department VARCHAR(120) NOT NULL DEFAULT '',
   phone VARCHAR(60) NOT NULL DEFAULT '',
   email VARCHAR(190) NOT NULL DEFAULT '',
+  avatar_key VARCHAR(40) NOT NULL DEFAULT 'employee-01.jpg',
   attendance_mode ENUM('hours','days') NOT NULL DEFAULT 'hours',
   pay_rate_cents BIGINT UNSIGNED NOT NULL DEFAULT 0,
   advance_amount_cents BIGINT UNSIGNED NOT NULL DEFAULT 0,
