@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 13;
+export const RELEASE = 14;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -24,7 +24,7 @@ export function extendWorkspace(state) {
     'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
   ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
   for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds']) state[key] ??= [];
-  state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; });
+  state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; });
   state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; });
   return state;
 }
@@ -109,11 +109,15 @@ export function applyOperation(state, action, payload) {
     const holder = (tool.holderType === 'crew' ? state.crews : state.employees).find((p) => p.id === tool.holderId);
     state.toolEvents.push({ id: id(), toolId: tool.id, toolName: tool.name, serial: tool.serial, kind: payload.kind, holder: holder.name, date: validDay(payload.date), dueDate: tool.dueDate, note: String(payload.note || '').slice(0, 2000) });
     if (payload.kind === 'return') { tool.holderType = ''; tool.holderId = ''; tool.dueDate = ''; }
+  } else if (action === 'employee.rates.save') {
+    if (!Array.isArray(payload.rows) || payload.rows.length !== state.employees.length) throw new Error('Некорректный список ставок');
+    for (const row of payload.rows) { const person = state.employees.find((item) => item.id === row.id); if (!person || !['hours','days'].includes(row.attendanceMode)) throw new Error('Сотрудник для ставки не найден'); person.attendanceMode = row.attendanceMode; person.payRate = round(num(row.payRate, 0, 1e7)); }
   } else if (action === 'attendance.save') {
     if (!state.employees.some((p) => p.id === payload.employeeId)) throw new Error('Выберите сотрудника');
     const date = validDay(payload.date);
     if (!['work', 'off', 'leave', 'sick'].includes(payload.kind)) throw new Error('Выберите отметку');
-    const hours = payload.kind === 'work' ? num(payload.hours, 0.01, 24) : 0;
+    const person = state.employees.find((p) => p.id === payload.employeeId);
+    const hours = payload.kind === 'work' ? (person.attendanceMode === 'days' ? 1 : num(payload.hours, 0.01, 24)) : 0;
     const existing = state.attendance.find((a) => a.employeeId === payload.employeeId && a.date === date);
     const row = { id: existing?.id || id(), employeeId: payload.employeeId, date, kind: payload.kind, hours, note: String(payload.note || '').slice(0, 2000), updatedAt: new Date().toISOString() };
     if (existing) Object.assign(existing, row); else state.attendance.push(row);

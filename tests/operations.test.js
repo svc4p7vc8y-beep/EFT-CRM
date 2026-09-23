@@ -36,6 +36,13 @@ test('табель обновляет отметку дня без двойно�
   assert.throws(()=>applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-09-23',kind:'work',hours:25}),/количество/);
   assert.throws(()=>applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-02-30',kind:'work',hours:8}));
 });
+test('ставка и режим по дням сохраняются, явка записывается без рабочих часов',()=>{
+  let s=createDemoState();const rows=s.employees.map((p)=>({id:p.id,attendanceMode:p.id==='worker-1'?'days':'hours',payRate:p.id==='worker-1'?3500:500}));
+  s=applyCommand(s,'employee.rates.save',{rows});
+  s=applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-09-23',kind:'work',hours:18});
+  assert.equal(s.employees.find((p)=>p.id==='worker-1').payRate,3500);
+  assert.equal(s.attendance[0].hours,1);validateState(s);
+});
 test('общая задача по шаблону доступна всем сотрудникам, чек-лист хранит снимок',()=>{
   let s=createDemoState();const t=s.taskTemplates[0];
   s=applyCommand(s,'task.create',{templateId:t.id,title:t.title,orderId:'',assigneeId:'manager-1',dueAt:'2026-09-24T10:00',quantity:1,completedQty:0,unit:'задача',priority:'normal'});
