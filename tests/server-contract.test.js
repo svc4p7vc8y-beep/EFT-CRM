@@ -18,6 +18,12 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(api, /employees\.save/);
   assert.match(api, /attendance\.list/);
   assert.match(api, /crews\.save/);
+  assert.match(api, /employees\.photo/);
+  assert.match(api, /is_uploaded_file/);
+  assert.match(api, /5 \* 1024 \* 1024/);
+  assert.match(api, /getimagesize/);
+  assert.match(api, /move_uploaded_file/);
+  assert.match(bootstrap, /function crm_avatar_key/);
   assert.match(bootstrap, /function crm_public_crews/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);

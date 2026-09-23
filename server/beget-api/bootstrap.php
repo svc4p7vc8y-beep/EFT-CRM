@@ -106,6 +106,11 @@ function crm_required_text(mixed $value, string $label, int $max = 2000): string
     return $text;
 }
 
+function crm_avatar_key(mixed $value): string {
+    $key = (string)$value;
+    return preg_match('/^(employee-(0[1-9]|1[0-5])\.jpg|e-[a-f0-9]{24}\.(jpg|png|webp))$/', $key) ? $key : 'employee-01.jpg';
+}
+
 function crm_date(mixed $value): string {
     $date = (string)$value;
     $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $date);

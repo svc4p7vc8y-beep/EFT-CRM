@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { FileLock2, HardHat, Plus, UserRound, UsersRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileLock2, HardHat, ImagePlus, Plus, UserRound, UsersRound } from 'lucide-react';
 import { Avatar, Field, PageHeading } from '../components/UI.jsx';
 import { EMPLOYEE_AVATARS, STAFF_ROLES, employee } from '../app/model.js';
 import './staff-settings.css';
@@ -13,9 +13,28 @@ function SettingsForm({ children, onSubmit, onClose }) {
 }
 
 export function EmployeeForm({ person, onSubmit, onClose, serverMode=false }) {
-  return <SettingsForm onClose={onClose} onSubmit={(data) => onSubmit({ name: data.get('name'), role: data.get('role'), department: data.get('department'), phone: data.get('phone'), email: data.get('email'), notes: data.get('notes'), avatar: data.get('avatar'), attendanceMode: data.get('attendanceMode'), active: data.has('active') })}>
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoError, setPhotoError] = useState('');
+  const [preview, setPreview] = useState(person?.avatar || EMPLOYEE_AVATARS[0]);
+  const [avatar, setAvatar] = useState(EMPLOYEE_AVATARS.includes(person?.avatar) ? person.avatar : '');
+  useEffect(() => {
+    if (!photoFile) return undefined;
+    const url = URL.createObjectURL(photoFile);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photoFile]);
+  function chooseFile(event) {
+    const file = event.target.files?.[0] || null;
+    setPhotoError('');
+    if (file && !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { event.target.value = ''; setPhotoError('Выберите изображение JPG, PNG или WebP.'); return; }
+    if (file && file.size > 5 * 1024 * 1024) { event.target.value = ''; setPhotoError('Фотография должна быть не больше 5 МБ.'); return; }
+    setPhotoFile(file);
+  }
+  return <SettingsForm onClose={onClose} onSubmit={(data) => onSubmit({ name: data.get('name'), role: data.get('role'), department: data.get('department'), phone: data.get('phone'), email: data.get('email'), notes: data.get('notes'), avatar: avatar || person?.avatar || EMPLOYEE_AVATARS[0], avatarKey: avatar ? avatar.split('/').pop() : person?.avatarKey, photoFile, attendanceMode: data.get('attendanceMode'), active: data.has('active') })}>
     <div className="form-grid">
-      <fieldset className="avatar-picker field-wide"><legend>Фотография сотрудника</legend><div>{EMPLOYEE_AVATARS.map((avatar, index) => <label key={avatar}><input type="radio" name="avatar" value={avatar} defaultChecked={(person?.avatar || EMPLOYEE_AVATARS[0]) === avatar} /><img src={avatar} alt={`Рисованный аватар ${index + 1}`} /></label>)}</div><small>15 вымышленных рисованных портретов: 12 мужских и 3 женских.</small></fieldset>
+      <fieldset className="avatar-picker field-wide"><legend>Фотография сотрудника</legend>
+        {serverMode ? <><div className="photo-upload"><img src={preview} alt="Предпросмотр фотографии сотрудника" /><span><strong>{photoFile ? photoFile.name : person?.avatarKey?.startsWith('e-') ? 'Загруженная фотография' : 'Загрузить свою фотографию'}</strong><small>JPG, PNG или WebP, до 5 МБ</small><label className="button"><ImagePlus size={17} />Выбрать файл<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseFile} /></label></span></div>{photoError ? <p className="photo-error" role="alert">{photoError}</p> : null}</> : null}
+        <p className="avatar-picker-label">Или выберите готовый аватар</p><div className="avatar-options">{EMPLOYEE_AVATARS.map((option, index) => <label key={option}><input type="radio" name="avatar" value={option} checked={avatar === option} onChange={() => { setAvatar(option); setPhotoFile(null); setPhotoError(''); setPreview(option); }} /><img src={option} alt={`Рисованный аватар ${index + 1}`} /></label>)}</div><small>15 вымышленных рисованных портретов: 12 мужских и 3 женских.</small></fieldset>
       <Field label="Имя / ФИО *" wide><input name="name" required maxLength={200} defaultValue={person?.name || ''} autoFocus /></Field>
       <Field label="Должность *"><select name="role" defaultValue={person?.role || 'Менеджер'}>{STAFF_ROLES.map((role) => <option key={role}>{role}</option>)}</select></Field>
       <Field label="Подразделение"><input name="department" maxLength={100} defaultValue={person?.department || ''} placeholder="Офис, цех, монтаж" /></Field>

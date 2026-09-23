@@ -91,7 +91,17 @@ export function AuthRoot() {
   });
 
   return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, serverData: auth.workspace,
-    saveEmployee: async (employee) => { const result = await crmApi.saveEmployee(employeeToApi(employee)); replaceEmployee(result.employee); return result.employee; },
+    saveEmployee: async (employee) => {
+      const result = await crmApi.saveEmployee(employeeToApi(employee));
+      let saved = result.employee;
+      replaceEmployee(saved);
+      if (employee.photoFile) {
+        const photo = await crmApi.uploadEmployeePhoto(saved.id, employee.photoFile);
+        saved = photo.employee;
+        replaceEmployee(saved);
+      }
+      return saved;
+    },
     saveCrew: async (crew) => { const result = await crmApi.saveCrew(crew); replaceCrew(result.crew); return result.crew; },
     loadAttendance: async (month) => { const result = await crmApi.attendance(month); updateWorkspace({ attendance: result.attendance, attendanceMonth: month }); return result.attendance; },
     saveAttendance: async (entry) => { const result = await crmApi.saveAttendance(entry); const attendance = [...(auth.workspace.attendance || [])]; const index = attendance.findIndex((item) => item.employeeId === result.attendance.employeeId && item.date === result.attendance.date); if (index >= 0) attendance[index] = result.attendance; else attendance.push(result.attendance); updateWorkspace({ attendance }); return result.attendance; },

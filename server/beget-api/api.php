@@ -138,7 +138,7 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     $id = crm_text($input['id'] ?? '', 36) ?: crm_uuid();
     $name = crm_required_text($input['name'] ?? '', 'ФИО сотрудника', 200);
     $attendanceMode = in_array($input['attendanceMode'] ?? '', ['hours', 'days'], true) ? $input['attendanceMode'] : 'hours';
-    $avatarKey = preg_match('/^employee-(0[1-9]|1[0-5])\.jpg$/', (string)($input['avatarKey'] ?? '')) ? (string)$input['avatarKey'] : 'employee-01.jpg';
+    $avatarKey = crm_avatar_key($input['avatarKey'] ?? '');
     $active = !array_key_exists('active', $input) || (bool)$input['active'];
     $existing = crm_db()->prepare('SELECT id, pay_rate_cents, advance_amount_cents FROM crm_employees WHERE id = ?');
     $existing->execute([$id]);
@@ -160,6 +160,41 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     crm_audit((int)$user['id'], $previous ? 'employee.update' : 'employee.create', 'employee', $id, ['financeChanged' => isset($input['payRate']) || isset($input['advanceAmount'])]);
     $saved = crm_db()->prepare('SELECT * FROM crm_employees WHERE id = ?');
     $saved->execute([$id]);
+    crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view'))]);
+}
+
+if ($action === 'employees.photo' && $method === 'POST') {
+    crm_require_origin();
+    $user = crm_require_capability('employees.manage');
+    crm_csrf();
+    $employeeId = crm_text($_POST['employeeId'] ?? '', 36);
+    $employee = crm_db()->prepare('SELECT * FROM crm_employees WHERE id = ?');
+    $employee->execute([$employeeId]);
+    $row = $employee->fetch();
+    if (!$row) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сотрудник не найден.'], 422);
+    $file = $_FILES['photo'] ?? null;
+    if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Не удалось загрузить фотографию. Проверьте размер файла.'], 422);
+    }
+    $size = (int)($file['size'] ?? 0);
+    if ($size < 1 || $size > 5 * 1024 * 1024) crm_json(['ok' => false, 'code' => 'payload_too_large', 'message' => 'Фотография должна быть не больше 5 МБ.'], 413);
+    $temporary = (string)($file['tmp_name'] ?? '');
+    if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
+    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    if (!isset($extensions[$mime])) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены фотографии JPG, PNG и WebP.'], 422);
+    $dimensions = @getimagesize($temporary);
+    if (!$dimensions || $dimensions[0] < 32 || $dimensions[1] < 32 || $dimensions[0] > 8000 || $dimensions[1] > 8000) {
+        crm_json(['ok' => false, 'code' => 'invalid_image', 'message' => 'Файл повреждён или имеет неподходящий размер изображения.'], 422);
+    }
+    $directory = dirname(__DIR__) . '/uploads/employees';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Cannot create employee upload directory');
+    $key = 'e-' . bin2hex(random_bytes(12)) . '.' . $extensions[$mime];
+    if (!move_uploaded_file($temporary, $directory . '/' . $key)) throw new RuntimeException('Cannot store employee photo');
+    crm_db()->prepare('UPDATE crm_employees SET avatar_key = ? WHERE id = ?')->execute([$key, $employeeId]);
+    crm_audit((int)$user['id'], 'employee.photo', 'employee', $employeeId, ['mime' => $mime, 'size' => $size]);
+    $saved = crm_db()->prepare('SELECT * FROM crm_employees WHERE id = ?');
+    $saved->execute([$employeeId]);
     crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view'))]);
 }
 
