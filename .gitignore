@@ -6,6 +6,8 @@ dist/
 .local/
 *.log
 coverage/
+server/**/config.local.php
+server/**/mail.local.php
 docs/PRODUCT_PLAN.md
 docs/DELIVERY_PLAN.md
 docs/FIRST_RELEASE.md

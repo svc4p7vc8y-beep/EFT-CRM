@@ -1,0 +1,81 @@
+name: Deploy EFT CRM to Beget
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eft-crm-beget-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Check PHP API syntax
+        run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Build frontend for crm.eftsip.ru
+        env:
+          VITE_CRM_API_URL: /api/api.php
+        run: npm run build
+      - name: Prepare deployment package
+        run: |
+          mkdir -p release/api
+          cp -R dist/. release/
+          cp server/beget-api/api.php server/beget-api/bootstrap.php release/api/
+      - name: Validate deployment secrets
+        env:
+          BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
+          BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
+          BEGET_SSH_PASSWORD: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
+          BEGET_SSH_KNOWN_HOSTS: ${{ secrets.CRM_BEGET_SSH_KNOWN_HOSTS }}
+          BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
+        run: |
+          : "${BEGET_SSH_HOST:?Missing CRM_BEGET_SSH_HOST}"
+          : "${BEGET_SSH_USER:?Missing CRM_BEGET_SSH_USER}"
+          : "${BEGET_SSH_PASSWORD:?Missing CRM_BEGET_SSH_PASSWORD}"
+          : "${BEGET_SSH_KNOWN_HOSTS:?Missing CRM_BEGET_SSH_KNOWN_HOSTS}"
+          : "${BEGET_DEPLOY_PATH:?Missing CRM_BEGET_DEPLOY_PATH}"
+          [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]
+      - name: Configure SSH
+        env:
+          BEGET_SSH_KNOWN_HOSTS: ${{ secrets.CRM_BEGET_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$BEGET_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Install SFTP helper
+        run: sudo apt-get update && sudo apt-get install --yes sshpass
+      - name: Verify protected server configuration
+        env:
+          BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
+          BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
+          SSHPASS: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
+          BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
+        run: |
+          sshpass -e ssh -p 22 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes \
+            "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
+            "test -f '${BEGET_DEPLOY_PATH%/}/api/config.local.php' && test -f '${BEGET_DEPLOY_PATH%/}/api/.htaccess'"
+      - name: Upload application
+        env:
+          BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
+          BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
+          SSHPASS: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
+          BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
+        run: |
+          sshpass -e rsync -az --checksum --omit-dir-times --no-perms --no-owner --no-group \
+            --exclude='api/config.local.php' --exclude='api/.htaccess' \
+            -e "ssh -p 22 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes" \
+            release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
+      - name: Verify CRM API
+        run: curl --fail --silent --show-error --max-time 30 https://crm.eftsip.ru/api/api.php?action=health | grep -q 'eft-crm-api'

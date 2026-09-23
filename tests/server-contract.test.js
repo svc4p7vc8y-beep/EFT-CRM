@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('сервер CRM использует отдельные таблицы и закрывает финансовые поля правами', () => {
+  const schema = read('server/beget-api/schema.sql');
+  const api = read('server/beget-api/api.php');
+  const bootstrap = read('server/beget-api/bootstrap.php');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_users/);
+  assert.match(schema, /pay_rate_cents/);
+  assert.doesNotMatch(schema, /CREATE TABLE IF NOT EXISTS eft_/);
+  assert.match(api, /crm_require_capability\('finance\.view'\)/);
+  assert.match(api, /Можно заполнять только свой табель/);
+  assert.match(bootstrap, /if \(\$includeFinance\)/);
+  assert.match(bootstrap, /httponly' => true/);
+  assert.match(bootstrap, /samesite' => 'Lax'/);
+});
+
+test('автопубликация Beget не передаёт секретную конфигурацию', () => {
+  const workflow = read('.github/workflows/beget.yml');
+  const ignore = read('.gitignore');
+  assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /--exclude='api\/config\.local\.php'/);
+  assert.match(workflow, /test -f '.+api\/config\.local\.php'/);
+  assert.match(ignore, /server\/\*\*\/config\.local\.php/);
+});
