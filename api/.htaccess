@@ -1,0 +1,9 @@
+Options -Indexes
+
+<FilesMatch "^(config\.local\.php|config\.example\.php|schema\.sql|create-admin\.php)$">
+  Require all denied
+</FilesMatch>
+
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ api.php [L,QSA]
