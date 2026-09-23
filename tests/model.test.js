@@ -33,3 +33,21 @@ test('импорт отбрасывает повреждённые связи и
   state.tasks[0].orderId = 'missing'; assert.throws(() => validateState(state), /задание/);
   state.tasks[0].orderId = 'order-1'; state.tasks[0].quantity = null; assert.throws(() => validateState(state), /задание/);
 });
+test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
+  let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });
+  const person = state.employees.at(-1);
+  assert.equal(person.role, 'Электрик');
+  state = applyCommand(state, 'crew.save', { name: 'Электромонтаж', specialty: 'Электрика', memberIds: [person.id], leadId: person.id, active: true });
+  assert.deepEqual(state.crews[0].memberIds, [person.id]);
+  assert.throws(() => applyCommand(state, 'crew.save', { name: 'Другая', memberIds: [], leadId: person.id }), /Бригадир/);
+  state = applyCommand(state, 'employee.save', { id: person.id, name: 'Тестовый электрик', role: 'Бригадир', active: false });
+  assert.equal(state.employees.find((p) => p.id === person.id).active, false);
+  assert.equal(state.crews[0].leadId, person.id);
+});
+test('старый формат данных получает справочники персонала без потери заявок', () => {
+  const old = createDemoState(); delete old.employees; delete old.crews;
+  const restored = validateState(old);
+  assert.equal(restored.employees.length, 9);
+  assert.equal(restored.crews.length, 0);
+  assert.equal(restored.leads.length, 5);
+});
