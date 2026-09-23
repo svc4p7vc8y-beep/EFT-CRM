@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 10;
+export const RELEASE = 11;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -17,7 +17,13 @@ export function extendWorkspace(state) {
     ...['Раскрой панелей', 'Сборка панелей', 'Маркировка и упаковка', 'Контроль качества', 'Подготовка инструмента'].map((title, i) => ({ id: `factory-action-${i}`, title, unit: 'комплект', description: '', checklist: ['Проверить задание', 'Передать результат'], active: true })),
     ...catalog.priceLab.map((row) => ({ id: row.id, title: row.name, unit: row.unit, description: row.cat, checklist: [], active: true })),
   ];
-  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance']) state[key] ??= [];
+  state.clientActions ??= [
+    'Перезвонить клиенту', 'Уточнить требования и комплектацию', 'Запросить планировку и размеры',
+    'Назначить встречу', 'Подготовить предварительный расчёт', 'Отправить коммерческое предложение',
+    'Согласовать смету', 'Согласовать договор', 'Получить предоплату', 'Запланировать выезд на объект',
+    'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
+  ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
+  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments']) state[key] ??= [];
   return state;
 }
 export const documentTypes = { receipt: 'Приход', issue: 'Выдача', return: 'Возврат', writeoff: 'Списание', direct: 'Покупка на объект' };
@@ -102,11 +108,21 @@ export function applyOperation(state, action, payload) {
     const previous = state.taskTemplates.find((t) => t.id === payload.id);
     const template = { id: previous?.id || id(), title: required(payload.title, 'действие'), unit: required(payload.unit, 'единица'), description: String(payload.description || '').slice(0, 2000), checklist: String(payload.checklist || '').split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 30), active: payload.active !== false };
     if (previous) Object.assign(previous, template); else state.taskTemplates.push(template);
+  } else if (action === 'client-action.save') {
+    const previous = state.clientActions.find((item) => item.id === payload.id);
+    const item = { id: previous?.id || id(), title: required(payload.title, 'вариант следующего действия').slice(0, 200), active: payload.active !== false };
+    if (previous) Object.assign(previous, item); else state.clientActions.push(item);
+  } else if (action === 'attachment.add') {
+    if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Объект не найден');
+    if (state.attachments.filter((item) => item.siteId === payload.siteId).length >= 30) throw new Error('В карточке уже 30 вложений');
+    const dataUrl = String(payload.dataUrl || '');
+    if (!/^data:[\w.+-]+\/[\w.+-]+;base64,/.test(dataUrl) || dataUrl.length > 1_100_000) throw new Error('Файл должен быть не больше 800 КБ');
+    state.attachments.unshift({ id: id(), siteId: payload.siteId, name: required(payload.name, 'имя файла').slice(0, 240), type: String(payload.type || 'application/octet-stream').slice(0, 120), size: num(payload.size, 1, 800000), dataUrl, note: String(payload.note || '').slice(0, 500), createdAt: new Date().toISOString(), authorId: payload.authorId || 'manager-1' });
   } else return false;
   return true;
 }
 export function validateOperations(state) {
-  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates']) {
+  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates', 'clientActions', 'attachments']) {
     const rows = state[table];
     if (!Array.isArray(rows) || rows.length > 20000 || rows.some((r) => !r || typeof r.id !== 'string' || !r.id) || new Set(rows.map((r) => r.id)).size !== rows.length) throw new Error(`Некорректный раздел: ${table}`);
   }
@@ -129,4 +145,6 @@ export function validateOperations(state) {
   for (const t of state.tools) { if (![t.name,t.serial,t.note].every(str) || !['production','field'].includes(t.home) || (t.holderId && !has(t.holderType === 'crew' ? 'crews' : 'employees', t.holderId))) throw new Error('Некорректный инструмент'); num(t.price); }
   for (const e of state.toolEvents) { validDay(e.date); if (!has('tools',e.toolId) || !['issue','return'].includes(e.kind) || ![e.holder,e.toolName,e.serial,e.note].every(str)) throw new Error('Некорректная выдача инструмента'); }
   for (const t of state.taskTemplates) if (![t.title,t.unit,t.description].every(str) || !Array.isArray(t.checklist) || t.checklist.some((s) => !str(s)) || typeof t.active !== 'boolean') throw new Error('Некорректный шаблон действия');
+  for (const item of state.clientActions) if (!str(item.title) || typeof item.active !== 'boolean') throw new Error('Некорректный список действий с клиентом');
+  for (const item of state.attachments) if (!has('sites', item.siteId) || ![item.name,item.type,item.dataUrl,item.note,item.createdAt,item.authorId].every((v) => typeof v === 'string') || item.dataUrl.length > 1_100_000 || !Number.isFinite(item.size) || item.size < 1 || item.size > 800000 || Number.isNaN(Date.parse(item.createdAt))) throw new Error('Некорректное вложение клиента');
 }

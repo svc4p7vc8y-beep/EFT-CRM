@@ -48,3 +48,11 @@ test('миграция добавляет каталог без замены с�
   const s=createDemoState();delete s.materials;delete s.attendance;delete s.taskTemplates;
   const loaded=validateState(s);assert.equal(loaded.materials.length,299);assert.equal(loaded.tasks.length,6);assert.equal(loaded.materials.filter((m)=>m.tracked).length,0);
 });
+test('карточка клиента хранит настраиваемые действия и вложения объекта',()=>{
+  let s=createDemoState();
+  s=applyCommand(s,'client-action.save',{title:'Запросить фото участка',active:true});
+  assert.equal(s.clientActions.at(-1).title,'Запросить фото участка');
+  s=applyCommand(s,'attachment.add',{siteId:'site-1',name:'участок.jpg',type:'image/jpeg',size:4,dataUrl:'data:image/jpeg;base64,AAAA'});
+  assert.equal(s.attachments.length,1);assert.equal(s.attachments[0].siteId,'site-1');validateState(s);
+  assert.throws(()=>applyCommand(s,'attachment.add',{siteId:'missing',name:'x.txt',type:'text/plain',size:3,dataUrl:'data:text/plain;base64,QQ=='}),/Объект/);
+});
