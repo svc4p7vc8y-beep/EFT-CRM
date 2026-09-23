@@ -93,6 +93,7 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     $id = crm_text($input['id'] ?? '', 36) ?: crm_uuid();
     $name = crm_required_text($input['name'] ?? '', 'ФИО сотрудника', 200);
     $attendanceMode = in_array($input['attendanceMode'] ?? '', ['hours', 'days'], true) ? $input['attendanceMode'] : 'hours';
+    $avatarKey = preg_match('/^employee-(0[1-9]|1[0-5])\.jpg$/', (string)($input['avatarKey'] ?? '')) ? (string)$input['avatarKey'] : 'employee-01.jpg';
     $active = !array_key_exists('active', $input) || (bool)$input['active'];
     $existing = crm_db()->prepare('SELECT id, pay_rate_cents, advance_amount_cents FROM crm_employees WHERE id = ?');
     $existing->execute([$id]);
@@ -104,11 +105,11 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     }
     if (isset($input['payRate'])) $payRate = crm_money_cents($input['payRate']);
     if (isset($input['advanceAmount'])) $advance = crm_money_cents($input['advanceAmount']);
-    $values = [$name, crm_text($input['role'] ?? '', 120), crm_text($input['department'] ?? '', 120), crm_text($input['phone'] ?? '', 60), crm_text($input['email'] ?? '', 190), $attendanceMode, $payRate, $advance, $active ? 1 : 0, crm_text($input['notes'] ?? '', 10000), $id];
+    $values = [$name, crm_text($input['role'] ?? '', 120), crm_text($input['department'] ?? '', 120), crm_text($input['phone'] ?? '', 60), crm_text($input['email'] ?? '', 190), $avatarKey, $attendanceMode, $payRate, $advance, $active ? 1 : 0, crm_text($input['notes'] ?? '', 10000), $id];
     if ($previous) {
-        $statement = crm_db()->prepare('UPDATE crm_employees SET full_name=?, role_name=?, department=?, phone=?, email=?, attendance_mode=?, pay_rate_cents=?, advance_amount_cents=?, active=?, notes=? WHERE id=?');
+        $statement = crm_db()->prepare('UPDATE crm_employees SET full_name=?, role_name=?, department=?, phone=?, email=?, avatar_key=?, attendance_mode=?, pay_rate_cents=?, advance_amount_cents=?, active=?, notes=? WHERE id=?');
     } else {
-        $statement = crm_db()->prepare('INSERT INTO crm_employees (full_name, role_name, department, phone, email, attendance_mode, pay_rate_cents, advance_amount_cents, active, notes, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $statement = crm_db()->prepare('INSERT INTO crm_employees (full_name, role_name, department, phone, email, avatar_key, attendance_mode, pay_rate_cents, advance_amount_cents, active, notes, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     }
     $statement->execute($values);
     crm_audit((int)$user['id'], $previous ? 'employee.update' : 'employee.create', 'employee', $id, ['financeChanged' => isset($input['payRate']) || isset($input['advanceAmount'])]);

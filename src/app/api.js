@@ -13,15 +13,16 @@ export class ApiError extends Error {
 
 let csrfToken = '';
 
-function actionUrl(action) {
+function actionUrl(action, query = {}) {
   const separator = API_URL.includes('?') ? '&' : '?';
-  return `${API_URL}${separator}action=${encodeURIComponent(action)}`;
+  const parameters = new URLSearchParams({ action, ...Object.fromEntries(Object.entries(query).filter(([, value]) => value !== '' && value !== undefined)) });
+  return `${API_URL}${separator}${parameters}`;
 }
 
-async function request(action, { method = 'GET', body, signal } = {}) {
+async function request(action, { method = 'GET', body, signal, query } = {}) {
   let response;
   try {
-    response = await fetch(actionUrl(action), {
+    response = await fetch(actionUrl(action, query), {
       method,
       credentials: 'same-origin',
       headers: {
@@ -59,5 +60,9 @@ export const crmApi = {
   login: (username, password) => request('login', { method: 'POST', body: { username, password } }),
   logout: () => request('logout', { method: 'POST', body: {} }),
   bootstrap: (signal) => request('bootstrap', { signal }),
+  saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
+  attendance: (month, employeeId = '', signal) => request('attendance.list', { signal, query: { month, employeeId } }),
+  saveAttendance: (entry) => request('attendance.save', { method: entry.id ? 'PUT' : 'POST', body: entry }),
+  payroll: (month, signal) => request('payroll', { signal, query: { month } }),
   clearSession: () => { csrfToken = ''; },
 };

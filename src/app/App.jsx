@@ -73,9 +73,9 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={command} search={search}/> : null}
-      {page === 'attendance' ? <Attendance state={state} command={command} search={search}/> : null}
+      {page === 'attendance' ? <Attendance state={state} command={command} search={search} runtime={runtime}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
-      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={state} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} /> : null}
+      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={state} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} runtime={runtime} /> : null}
     </main></div>{dialog}{toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19} /> : <CircleCheck size={19} />}<span>{toast.text}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="Закрыть уведомление"><X size={15} /></button></div> : null}
   </div>;
 }

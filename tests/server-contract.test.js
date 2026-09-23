@@ -10,10 +10,13 @@ test('сервер CRM использует отдельные таблицы и
   const bootstrap = read('server/beget-api/bootstrap.php');
   assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_users/);
   assert.match(schema, /pay_rate_cents/);
+  assert.match(schema, /avatar_key/);
   assert.doesNotMatch(schema, /CREATE TABLE IF NOT EXISTS eft_/);
   assert.match(api, /crm_require_capability\('finance\.view'\)/);
   assert.match(api, /Можно заполнять только свой табель/);
   assert.match(bootstrap, /if \(\$includeFinance\)/);
+  assert.match(api, /employees\.save/);
+  assert.match(api, /attendance\.list/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);
 });
