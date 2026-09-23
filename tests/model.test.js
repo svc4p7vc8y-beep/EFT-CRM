@@ -51,3 +51,11 @@ test('старый формат данных получает справочни
   assert.equal(restored.crews.length, 0);
   assert.equal(restored.leads.length, 5);
 });
+test('перенос задачи сохраняет исходный срок и полную историю изменений', () => {
+  let state = createDemoState(); const original = state.tasks[0].dueAt;
+  state = applyCommand(state, 'task.reschedule', { id: 'task-1', dueAt: '2026-10-01T11:30' });
+  state = applyCommand(state, 'task.reschedule', { id: 'task-1', dueAt: '2026-10-03T11:30' });
+  const task = state.tasks.find((item) => item.id === 'task-1');
+  assert.equal(task.originalDueAt, original); assert.equal(task.dueAt, '2026-10-03T11:30'); assert.equal(task.rescheduleHistory.length, 2);
+  assert.equal(task.rescheduleHistory[0].from, '2026-10-01T11:30'); validateState(state);
+});

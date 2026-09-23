@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
-import { Badge, Empty, Timeline } from '../components/UI.jsx';
+import { Badge, Empty, Timeline, VoiceInput } from '../components/UI.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
@@ -71,11 +71,11 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
       <div className="client-main">
         <section className="client-panel next-step-panel"><div className="client-section-title"><div><CalendarDays size={19} /><h2>Следующее действие</h2></div><span>обязательный шаг по клиенту</span></div>
           <form className="next-step-form" onSubmit={saveNextAction}><label><span>Действие</span><select name="nextAction" defaultValue={lead.nextAction} key={`${lead.id}-${lead.nextAction}`}>{state.clientActions.filter((item) => item.active).map((item) => <option key={item.id}>{item.title}</option>)}{lead.nextAction && !state.clientActions.some((item) => item.title === lead.nextAction) ? <option>{lead.nextAction}</option> : null}</select></label><label><span>Дата и время</span><input name="dueAt" type="datetime-local" defaultValue={lead.dueAt} /></label><button className="button primary">Запланировать</button></form>
-          <details className="action-maker"><summary><Plus size={14} />Добавить свой вариант действия</summary><form onSubmit={addAction}><input aria-label="Новый вариант действия" value={newAction} onChange={(event) => setNewAction(event.target.value)} maxLength={200} required placeholder="Например, запросить фото участка"/><button className="button" type="submit">Добавить</button></form></details>
+          <details className="action-maker"><summary><Plus size={14} />Добавить свой вариант действия</summary><form onSubmit={addAction}><VoiceInput><input aria-label="Новый вариант действия" value={newAction} onChange={(event) => setNewAction(event.target.value)} maxLength={200} required placeholder="Например, запросить фото участка"/></VoiceInput><button className="button" type="submit">Добавить</button></form></details>
         </section>
 
         <section className="client-panel"><div className="client-section-title"><div><MessageSquare size={19} /><h2>История общения</h2></div><span>{events.length} событий</span></div>
-          <form className="quick-communication" onSubmit={addActivity}><select aria-label="Канал общения" value={activityType} onChange={(event) => setActivityType(event.target.value)}><option value="call">Звонок</option><option value="message">Мессенджер</option><option value="email">Письмо</option><option value="meeting">Встреча</option><option value="note">Заметка</option></select><textarea aria-label="Результат общения" value={activityText} onChange={(event) => setActivityText(event.target.value)} required rows={3} maxLength={5000} placeholder="Что обсудили, что решил клиент, что сделать дальше"/><button className="button primary">Добавить в историю</button></form>
+          <form className="quick-communication" onSubmit={addActivity}><select aria-label="Канал общения" value={activityType} onChange={(event) => setActivityType(event.target.value)}><option value="call">Звонок</option><option value="message">Мессенджер</option><option value="email">Письмо</option><option value="meeting">Встреча</option><option value="note">Заметка</option></select><VoiceInput><textarea aria-label="Результат общения" value={activityText} onChange={(event) => setActivityText(event.target.value)} required rows={3} maxLength={5000} placeholder="Что обсудили, что решил клиент, что сделать дальше"/></VoiceInput><button className="button primary">Добавить в историю</button></form>
           <Timeline state={state} events={events} />
         </section>
 

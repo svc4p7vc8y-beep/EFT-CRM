@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 12;
+export const RELEASE = 13;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -24,6 +24,8 @@ export function extendWorkspace(state) {
     'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
   ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
   for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds']) state[key] ??= [];
+  state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; });
+  state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; });
   return state;
 }
 export const documentTypes = { receipt: 'Приход', issue: 'Выдача', return: 'Возврат', writeoff: 'Списание', direct: 'Покупка на объект' };
