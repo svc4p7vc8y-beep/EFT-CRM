@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 16;
+export const RELEASE = 17;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -24,7 +24,7 @@ export function extendWorkspace(state) {
     'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
   ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
   for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds']) state[key] ??= [];
-  state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; });
+  state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; person.advanceAmount ??= 0; });
   state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; });
   return state;
 }
@@ -111,7 +111,7 @@ export function applyOperation(state, action, payload) {
     if (payload.kind === 'return') { tool.holderType = ''; tool.holderId = ''; tool.dueDate = ''; }
   } else if (action === 'employee.rates.save') {
     if (!Array.isArray(payload.rows) || payload.rows.length !== state.employees.length) throw new Error('Некорректный список ставок');
-    for (const row of payload.rows) { const person = state.employees.find((item) => item.id === row.id); if (!person || !['hours','days'].includes(row.attendanceMode)) throw new Error('Сотрудник для ставки не найден'); person.attendanceMode = row.attendanceMode; person.payRate = round(num(row.payRate, 0, 1e7)); }
+    for (const row of payload.rows) { const person = state.employees.find((item) => item.id === row.id); if (!person || !['hours','days'].includes(row.attendanceMode)) throw new Error('Сотрудник для ставки не найден'); person.attendanceMode = row.attendanceMode; person.payRate = round(num(row.payRate, 0, 1e7)); person.advanceAmount = round(num(row.advanceAmount, 0, 1e7)); }
   } else if (action === 'attendance.save') {
     if (!state.employees.some((p) => p.id === payload.employeeId)) throw new Error('Выберите сотрудника');
     const date = validDay(payload.date);

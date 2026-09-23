@@ -36,11 +36,12 @@ test('табель обновляет отметку дня без двойно�
   assert.throws(()=>applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-09-23',kind:'work',hours:25}),/количество/);
   assert.throws(()=>applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-02-30',kind:'work',hours:8}));
 });
-test('ставка и режим по дням сохраняются, явка записывается без рабочих часов',()=>{
-  let s=createDemoState();const rows=s.employees.map((p)=>({id:p.id,attendanceMode:p.id==='worker-1'?'days':'hours',payRate:p.id==='worker-1'?3500:500}));
+test('ставка, фиксированный аванс и режим по дням сохраняются',()=>{
+  let s=createDemoState();const rows=s.employees.map((p)=>({id:p.id,attendanceMode:p.id==='worker-1'?'days':'hours',payRate:p.id==='worker-1'?3500:500,advanceAmount:p.id==='worker-1'?12000:0}));
   s=applyCommand(s,'employee.rates.save',{rows});
   s=applyCommand(s,'attendance.save',{employeeId:'worker-1',date:'2026-09-23',kind:'work',hours:18});
   assert.equal(s.employees.find((p)=>p.id==='worker-1').payRate,3500);
+  assert.equal(s.employees.find((p)=>p.id==='worker-1').advanceAmount,12000);
   assert.equal(s.attendance[0].hours,1);validateState(s);
 });
 test('общая задача по шаблону доступна всем сотрудникам, чек-лист хранит снимок',()=>{
