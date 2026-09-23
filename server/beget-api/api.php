@@ -37,9 +37,10 @@ if ($action === 'login' && $method === 'POST') {
     $_SESSION['user_id'] = (int)$row['id'];
     $_SESSION['auth_tag'] = crm_session_tag($row);
     $_SESSION['csrf'] = bin2hex(random_bytes(24));
+    unset($_SESSION['finance_unlocked']);
     crm_db()->prepare('UPDATE crm_users SET last_login_at = NOW() WHERE id = ?')->execute([(int)$row['id']]);
     crm_audit((int)$row['id'], 'auth.login', 'user', (string)$row['id']);
-    crm_json(['ok' => true, 'user' => crm_session_user(), 'capabilities' => crm_capabilities((string)$row['role']), 'csrf' => $_SESSION['csrf']]);
+    crm_json(['ok' => true, 'user' => crm_session_user(), 'capabilities' => crm_capabilities((string)$row['role']), 'financeUnlocked' => false, 'csrf' => $_SESSION['csrf']]);
 }
 
 if ($action === 'session' && $method === 'GET') {
@@ -47,7 +48,7 @@ if ($action === 'session' && $method === 'GET') {
     $user = crm_session_user();
     if (!$user) crm_json(['ok' => true, 'authenticated' => false]);
     $_SESSION['csrf'] ??= bin2hex(random_bytes(24));
-    crm_json(['ok' => true, 'authenticated' => true, 'user' => $user, 'capabilities' => crm_capabilities((string)$user['role']), 'csrf' => $_SESSION['csrf']]);
+    crm_json(['ok' => true, 'authenticated' => true, 'user' => $user, 'capabilities' => crm_capabilities((string)$user['role']), 'financeUnlocked' => crm_finance_unlocked(), 'csrf' => $_SESSION['csrf']]);
 }
 
 if ($action === 'logout' && $method === 'POST') {
@@ -76,15 +77,89 @@ if ($action === 'bootstrap' && $method === 'GET') {
     } else {
         $rows = [];
     }
-    $includeFinance = crm_can($user, 'finance.view');
+    $includeFinance = crm_can($user, 'finance.view') && crm_finance_unlocked();
     $includeCrews = crm_can($user, 'crews.view') || crm_can($user, 'crews.manage');
+    $includeUsers = crm_can($user, 'users.manage');
     crm_json([
         'ok' => true,
         'user' => $user,
         'capabilities' => crm_capabilities((string)$user['role']),
+        'financeUnlocked' => $includeFinance,
         'employees' => array_map(static fn(array $row): array => crm_public_employee($row, $includeFinance), $rows),
         'crews' => $includeCrews ? crm_public_crews() : [],
+        'users' => $includeUsers ? array_map('crm_public_user', crm_db()->query('SELECT id, username, display_name, role, employee_id, active, last_login_at FROM crm_users ORDER BY active DESC, display_name')->fetchAll()) : [],
     ]);
+}
+
+if ($action === 'finance.unlock' && $method === 'POST') {
+    crm_require_origin();
+    $user = crm_require_capability('finance.view');
+    crm_csrf();
+    crm_settings_ensure();
+    $input = crm_input(16384);
+    $pin = preg_replace('/\s+/', '', (string)($input['pin'] ?? ''));
+    $attempts = (array)($_SESSION['finance_attempts'] ?? []);
+    $attempts = array_values(array_filter($attempts, static fn(int $time): bool => $time > time() - 900));
+    if (count($attempts) >= 5) crm_json(['ok' => false, 'code' => 'too_many_attempts', 'message' => 'Слишком много попыток. Повторите через 15 минут.'], 429);
+    $statement = crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key = ?');
+    $statement->execute(['attendance_finance_pin_hash']);
+    if (!password_verify($pin, (string)$statement->fetchColumn())) {
+        $attempts[] = time(); $_SESSION['finance_attempts'] = $attempts;
+        crm_json(['ok' => false, 'code' => 'invalid_pin', 'message' => 'Неверный пароль финансовой части.'], 401);
+    }
+    $_SESSION['finance_unlocked'] = true; unset($_SESSION['finance_attempts']);
+    crm_audit((int)$user['id'], 'finance.unlock', 'settings');
+    crm_json(['ok' => true, 'financeUnlocked' => true]);
+}
+
+if ($action === 'finance.lock' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); unset($_SESSION['finance_unlocked']);
+    crm_audit((int)$user['id'], 'finance.lock', 'settings');
+    crm_json(['ok' => true, 'financeUnlocked' => false]);
+}
+
+if ($action === 'finance.pin.update' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('finance.manage'); crm_csrf(); crm_settings_ensure();
+    $input = crm_input(16384);
+    $current = preg_replace('/\s+/', '', (string)($input['currentPin'] ?? ''));
+    $next = preg_replace('/\s+/', '', (string)($input['newPin'] ?? ''));
+    if (!preg_match('/^\d{3,12}$/', $next)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Новый пароль должен содержать от 3 до 12 цифр.'], 422);
+    $statement = crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key = ?'); $statement->execute(['attendance_finance_pin_hash']);
+    if (!password_verify($current, (string)$statement->fetchColumn())) crm_json(['ok' => false, 'code' => 'invalid_pin', 'message' => 'Текущий пароль указан неверно.'], 401);
+    crm_db()->prepare('UPDATE crm_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?')->execute([password_hash($next, PASSWORD_DEFAULT), (int)$user['id'], 'attendance_finance_pin_hash']);
+    $_SESSION['finance_unlocked'] = true; crm_audit((int)$user['id'], 'finance.pin.update', 'settings');
+    crm_json(['ok' => true, 'financeUnlocked' => true]);
+}
+
+if ($action === 'users.save' && in_array($method, ['POST', 'PUT'], true)) {
+    crm_require_origin(); $actor = crm_require_capability('users.manage'); crm_csrf(); $input = crm_input();
+    $id = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
+    $username = mb_strtolower(crm_required_text($input['username'] ?? '', 'логин', 96));
+    if (!preg_match('/^[a-z0-9._-]{3,96}$/', $username)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Логин: 3–96 латинских букв, цифр, точек, дефисов или подчёркиваний.'], 422);
+    $displayName = crm_required_text($input['displayName'] ?? '', 'имя пользователя', 180);
+    $roles = ['owner','admin','finance','manager','production','procurement','foreman','employee','viewer'];
+    $role = in_array($input['role'] ?? '', $roles, true) ? $input['role'] : 'employee';
+    $employeeId = crm_text($input['employeeId'] ?? '', 36) ?: null; $active = !array_key_exists('active', $input) || (bool)$input['active'];
+    if ($id === (int)$actor['id'] && !$active) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Нельзя отключить собственную учётную запись.'], 422);
+    $password = (string)($input['password'] ?? '');
+    if (($id === 0 || $password !== '') && strlen($password) < 8) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Пароль входа должен содержать не меньше 8 символов.'], 422);
+    try {
+        if ($id) {
+            $exists = crm_db()->prepare('SELECT id FROM crm_users WHERE id = ?'); $exists->execute([$id]); if (!$exists->fetchColumn()) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Учётная запись не найдена.'], 404);
+            $sql = 'UPDATE crm_users SET username=?, display_name=?, role=?, employee_id=?, active=?'; $params = [$username,$displayName,$role,$employeeId,$active?1:0];
+            if ($password !== '') { $sql .= ', password_hash=?'; $params[] = password_hash($password, PASSWORD_DEFAULT); }
+            $sql .= ' WHERE id=?'; $params[] = $id; crm_db()->prepare($sql)->execute($params);
+        } else {
+            crm_db()->prepare('INSERT INTO crm_users (username, display_name, password_hash, role, employee_id, active) VALUES (?, ?, ?, ?, ?, ?)')->execute([$username,$displayName,password_hash($password, PASSWORD_DEFAULT),$role,$employeeId,$active?1:0]);
+            $id = (int)crm_db()->lastInsertId();
+        }
+    } catch (PDOException $error) {
+        if ($error->getCode() === '23000') crm_json(['ok' => false, 'code' => 'duplicate', 'message' => 'Такой логин или сотрудник уже связан с другой учётной записью.'], 409);
+        throw $error;
+    }
+    crm_audit((int)$actor['id'], $method === 'POST' ? 'user.create' : 'user.update', 'user', (string)$id, ['passwordChanged' => $password !== '']);
+    $saved = crm_db()->prepare('SELECT id, username, display_name, role, employee_id, active, last_login_at FROM crm_users WHERE id = ?'); $saved->execute([$id]);
+    crm_json(['ok' => true, 'user' => crm_public_user($saved->fetch())]);
 }
 
 if ($action === 'crews.save' && in_array($method, ['POST', 'PUT'], true)) {
@@ -148,6 +223,7 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     if ((isset($input['payRate']) || isset($input['advanceAmount'])) && !crm_can($user, 'finance.manage')) {
         crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Изменять ставки может только финансовая роль.'], 403);
     }
+    if (isset($input['payRate']) || isset($input['advanceAmount'])) crm_require_finance_unlocked();
     if (isset($input['payRate'])) $payRate = crm_money_cents($input['payRate']);
     if (isset($input['advanceAmount'])) $advance = crm_money_cents($input['advanceAmount']);
     $values = [$name, crm_text($input['role'] ?? '', 120), crm_text($input['department'] ?? '', 120), crm_text($input['phone'] ?? '', 60), crm_text($input['email'] ?? '', 190), $avatarKey, $attendanceMode, $payRate, $advance, $active ? 1 : 0, crm_text($input['notes'] ?? '', 10000), $id];
@@ -160,7 +236,7 @@ if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {
     crm_audit((int)$user['id'], $previous ? 'employee.update' : 'employee.create', 'employee', $id, ['financeChanged' => isset($input['payRate']) || isset($input['advanceAmount'])]);
     $saved = crm_db()->prepare('SELECT * FROM crm_employees WHERE id = ?');
     $saved->execute([$id]);
-    crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view'))]);
+    crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view') && crm_finance_unlocked())]);
 }
 
 if ($action === 'employees.photo' && $method === 'POST') {
@@ -195,7 +271,7 @@ if ($action === 'employees.photo' && $method === 'POST') {
     crm_audit((int)$user['id'], 'employee.photo', 'employee', $employeeId, ['mime' => $mime, 'size' => $size]);
     $saved = crm_db()->prepare('SELECT * FROM crm_employees WHERE id = ?');
     $saved->execute([$employeeId]);
-    crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view'))]);
+    crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view') && crm_finance_unlocked())]);
 }
 
 if ($action === 'attendance.list' && $method === 'GET') {
@@ -257,6 +333,7 @@ if ($action === 'attendance.save' && in_array($method, ['POST', 'PUT'], true)) {
 
 if ($action === 'payroll' && $method === 'GET') {
     crm_require_capability('finance.view');
+    crm_require_finance_unlocked();
     $month = (string)($_GET['month'] ?? date('Y-m'));
     if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте месяц.'], 422);
     $employees = crm_db()->query('SELECT id, full_name, attendance_mode, pay_rate_cents, advance_amount_cents FROM crm_employees WHERE active = 1 ORDER BY full_name')->fetchAll();

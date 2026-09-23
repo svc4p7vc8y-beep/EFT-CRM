@@ -89,8 +89,19 @@ export function AuthRoot() {
     if (index >= 0) crews[index] = crew; else crews.push(crew);
     return { ...current, workspace: { ...current.workspace, crews } };
   });
+  const refreshWorkspace = async () => {
+    const workspace = await crmApi.bootstrap();
+    setAuth((current) => current.status === 'ready' ? { ...current, session: { ...current.session, financeUnlocked: workspace.financeUnlocked }, workspace } : current);
+    return workspace;
+  };
+  const replaceUser = (user) => setAuth((current) => {
+    if (current.status !== 'ready') return current;
+    const users = [...(current.workspace.users || [])]; const index = users.findIndex((item) => item.id === user.id);
+    if (index >= 0) users[index] = user; else users.push(user);
+    return { ...current, workspace: { ...current.workspace, users } };
+  });
 
-  return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, serverData: auth.workspace,
+  return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, financeUnlocked: Boolean(auth.workspace.financeUnlocked), serverData: auth.workspace,
     saveEmployee: async (employee) => {
       const result = await crmApi.saveEmployee(employeeToApi(employee));
       let saved = result.employee;
@@ -103,6 +114,10 @@ export function AuthRoot() {
       return saved;
     },
     saveCrew: async (crew) => { const result = await crmApi.saveCrew(crew); replaceCrew(result.crew); return result.crew; },
+    saveUser: async (user) => { const result = await crmApi.saveUser(user); replaceUser(result.user); return result.user; },
+    unlockFinance: async (pin) => { await crmApi.unlockFinance(pin); await refreshWorkspace(); },
+    lockFinance: async () => { await crmApi.lockFinance(); await refreshWorkspace(); },
+    updateFinancePin: async (currentPin, newPin) => { await crmApi.updateFinancePin(currentPin, newPin); await refreshWorkspace(); },
     loadAttendance: async (month) => { const result = await crmApi.attendance(month); updateWorkspace({ attendance: result.attendance, attendanceMonth: month }); return result.attendance; },
     saveAttendance: async (entry) => { const result = await crmApi.saveAttendance(entry); const attendance = [...(auth.workspace.attendance || [])]; const index = attendance.findIndex((item) => item.employeeId === result.attendance.employeeId && item.date === result.attendance.date); if (index >= 0) attendance[index] = result.attendance; else attendance.push(result.attendance); updateWorkspace({ attendance }); return result.attendance; },
     saveRates: async (rows) => { for (const row of rows) { const employee = auth.workspace.employees.find((item) => item.id === row.id); if (employee) { const result = await crmApi.saveEmployee(employeeToApi({ ...employee, ...row })); replaceEmployee(result.employee); } } },

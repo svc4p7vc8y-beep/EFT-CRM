@@ -83,6 +83,10 @@ export const crmApi = {
     return request('employees.photo', { method: 'POST', body });
   },
   saveCrew: (crew) => request('crews.save', { method: crew.id ? 'PUT' : 'POST', body: crew }),
+  saveUser: (user) => request('users.save', { method: user.id ? 'PUT' : 'POST', body: user }),
+  unlockFinance: (pin) => request('finance.unlock', { method: 'POST', body: { pin } }),
+  lockFinance: () => request('finance.lock', { method: 'POST', body: {} }),
+  updateFinancePin: (currentPin, newPin) => request('finance.pin.update', { method: 'POST', body: { currentPin, newPin } }),
   attendance: (month, employeeId = '', signal) => request('attendance.list', { signal, query: { month, employeeId } }),
   saveAttendance: (entry) => request('attendance.save', { method: entry.id ? 'PUT' : 'POST', body: entry }),
   payroll: (month, signal) => request('payroll', { signal, query: { month } }),

@@ -205,3 +205,11 @@ CREATE TABLE IF NOT EXISTS crm_login_attempts (
   PRIMARY KEY (id),
   KEY idx_crm_login_limit (ip_hash, attempted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_settings (
+  setting_key VARCHAR(120) NOT NULL,
+  setting_value VARCHAR(255) NOT NULL,
+  updated_by BIGINT UNSIGNED NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

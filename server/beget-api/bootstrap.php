@@ -162,6 +162,29 @@ function crm_capabilities(string $role): array {
     return $matrix[$role] ?? [];
 }
 
+function crm_settings_ensure(): void {
+    static $ready = false;
+    if ($ready) return;
+    crm_db()->exec("CREATE TABLE IF NOT EXISTS crm_settings (setting_key VARCHAR(120) NOT NULL, setting_value VARCHAR(255) NOT NULL, updated_by BIGINT UNSIGNED NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (setting_key)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $exists = crm_db()->prepare('SELECT setting_key FROM crm_settings WHERE setting_key = ?');
+    $exists->execute(['attendance_finance_pin_hash']);
+    if (!$exists->fetchColumn()) crm_db()->prepare('INSERT INTO crm_settings (setting_key, setting_value) VALUES (?, ?)')->execute(['attendance_finance_pin_hash', password_hash('911', PASSWORD_DEFAULT)]);
+    $ready = true;
+}
+
+function crm_finance_unlocked(): bool {
+    crm_session_start();
+    return !empty($_SESSION['finance_unlocked']);
+}
+
+function crm_require_finance_unlocked(): void {
+    if (!crm_finance_unlocked()) crm_json(['ok' => false, 'code' => 'finance_locked', 'message' => 'Сначала откройте финансовую часть паролем.'], 403);
+}
+
+function crm_public_user(array $row): array {
+    return ['id' => (int)$row['id'], 'username' => $row['username'], 'displayName' => $row['display_name'], 'role' => $row['role'], 'employeeId' => $row['employee_id'] ?: '', 'active' => (bool)$row['active'], 'lastLoginAt' => $row['last_login_at']];
+}
+
 function crm_can(array $user, string $capability): bool {
     $capabilities = crm_capabilities((string)$user['role']);
     return in_array('*', $capabilities, true) || in_array($capability, $capabilities, true);
