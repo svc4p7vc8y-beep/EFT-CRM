@@ -200,6 +200,23 @@ function crm_public_employee(array $row, bool $includeFinance): array {
     return $employee;
 }
 
+function crm_public_crews(): array {
+    $crews = crm_db()->query('SELECT id, name, specialty, foreman_id, phone, notes, active FROM crm_crews ORDER BY active DESC, name')->fetchAll();
+    $members = crm_db()->query('SELECT crew_id, employee_id FROM crm_crew_members ORDER BY joined_at')->fetchAll();
+    $memberIds = [];
+    foreach ($members as $member) $memberIds[$member['crew_id']][] = $member['employee_id'];
+    return array_map(static fn(array $crew): array => [
+        'id' => $crew['id'],
+        'name' => $crew['name'],
+        'specialty' => $crew['specialty'],
+        'leadId' => $crew['foreman_id'] ?: '',
+        'phone' => $crew['phone'],
+        'notes' => $crew['notes'],
+        'active' => (bool)$crew['active'],
+        'memberIds' => $memberIds[$crew['id']] ?? [],
+    ], $crews);
+}
+
 function crm_money_cents(mixed $value): int {
     if (!is_numeric($value)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте сумму.'], 422);
     $number = round((float)$value * 100);
