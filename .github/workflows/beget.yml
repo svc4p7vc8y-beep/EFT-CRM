@@ -26,14 +26,14 @@ jobs:
         run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Build frontend for crm.eftsip.ru
         env:
-          VITE_CRM_API_URL: /api/api.php
+          VITE_CRM_API_URL: /api/
         run: npm run build
       - name: Prepare deployment package
         run: |
           mkdir -p release/api
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
-          cp server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/install.php server/beget-api/schema.sql release/api/
           cp server/beget-api/.htaccess.example release/api/.htaccess
       - name: Validate deployment secrets
         env:
@@ -80,4 +80,4 @@ jobs:
             -e "ssh -p 22 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes" \
             release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
       - name: Verify CRM API
-        run: curl --fail --silent --show-error --max-time 30 https://crm.eftsip.ru/api/api.php?action=health | grep -q 'eft-crm-api'
+        run: curl --fail --silent --show-error --max-time 30 https://crm.eftsip.ru/api/?action=health | grep -q 'eft-crm-api'

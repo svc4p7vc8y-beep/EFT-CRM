@@ -26,10 +26,14 @@ test('сервер CRM использует отдельные таблицы и
 test('автопубликация Beget не передаёт секретную конфигурацию', () => {
   const workflow = read('.github/workflows/beget.yml');
   const ignore = read('.gitignore');
+  const entrypoint = read('server/beget-api/index.php');
   assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /VITE_CRM_API_URL: \/api\//);
+  assert.match(workflow, /beget-api\/index\.php/);
   assert.match(workflow, /--exclude='api\/config\.local\.php'/);
   assert.match(workflow, /test -f '.+api\/config\.local\.php'/);
   assert.match(ignore, /server\/\*\*\/config\.local\.php/);
+  assert.match(entrypoint, /require __DIR__ \. '\/api\.php'/);
 });
 
 test('одноразовый установщик закрывается после создания конфигурации', () => {
