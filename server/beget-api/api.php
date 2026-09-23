@@ -77,12 +77,57 @@ if ($action === 'bootstrap' && $method === 'GET') {
         $rows = [];
     }
     $includeFinance = crm_can($user, 'finance.view');
+    $includeCrews = crm_can($user, 'crews.view') || crm_can($user, 'crews.manage');
     crm_json([
         'ok' => true,
         'user' => $user,
         'capabilities' => crm_capabilities((string)$user['role']),
         'employees' => array_map(static fn(array $row): array => crm_public_employee($row, $includeFinance), $rows),
+        'crews' => $includeCrews ? crm_public_crews() : [],
     ]);
+}
+
+if ($action === 'crews.save' && in_array($method, ['POST', 'PUT'], true)) {
+    crm_require_origin();
+    $user = crm_require_capability('crews.manage');
+    crm_csrf();
+    $input = crm_input();
+    $id = crm_text($input['id'] ?? '', 36) ?: crm_uuid();
+    $name = crm_required_text($input['name'] ?? '', 'название бригады', 200);
+    $memberIds = array_values(array_unique(array_filter(array_map(static fn(mixed $value): string => crm_text($value, 36), is_array($input['memberIds'] ?? null) ? $input['memberIds'] : []))));
+    if (count($memberIds) > 100) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'В бригаде не может быть больше 100 сотрудников.'], 422);
+    $leadId = crm_text($input['leadId'] ?? '', 36);
+    if ($leadId !== '' && !in_array($leadId, $memberIds, true)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Бригадир должен входить в состав бригады.'], 422);
+    if ($memberIds) {
+        $placeholders = implode(',', array_fill(0, count($memberIds), '?'));
+        $activeEmployees = crm_db()->prepare("SELECT id FROM crm_employees WHERE id IN ($placeholders)");
+        $activeEmployees->execute($memberIds);
+        if (count($activeEmployees->fetchAll()) !== count($memberIds)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Один из сотрудников бригады не найден.'], 422);
+    }
+    $exists = crm_db()->prepare('SELECT id FROM crm_crews WHERE id = ?');
+    $exists->execute([$id]);
+    $previous = (bool)$exists->fetchColumn();
+    $db = crm_db();
+    $db->beginTransaction();
+    try {
+        if ($previous) {
+            $statement = $db->prepare('UPDATE crm_crews SET name=?, specialty=?, foreman_id=?, phone=?, notes=?, active=? WHERE id=?');
+            $statement->execute([$name, crm_text($input['specialty'] ?? '', 160), $leadId ?: null, crm_text($input['phone'] ?? '', 60), crm_text($input['notes'] ?? '', 10000), !array_key_exists('active', $input) || (bool)$input['active'] ? 1 : 0, $id]);
+            $db->prepare('DELETE FROM crm_crew_members WHERE crew_id = ?')->execute([$id]);
+        } else {
+            $statement = $db->prepare('INSERT INTO crm_crews (id, name, specialty, foreman_id, phone, notes, active) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $statement->execute([$id, $name, crm_text($input['specialty'] ?? '', 160), $leadId ?: null, crm_text($input['phone'] ?? '', 60), crm_text($input['notes'] ?? '', 10000), !array_key_exists('active', $input) || (bool)$input['active'] ? 1 : 0]);
+        }
+        $insertMember = $db->prepare('INSERT INTO crm_crew_members (crew_id, employee_id) VALUES (?, ?)');
+        foreach ($memberIds as $employeeId) $insertMember->execute([$id, $employeeId]);
+        $db->commit();
+    } catch (Throwable $error) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $error;
+    }
+    crm_audit((int)$user['id'], $previous ? 'crew.update' : 'crew.create', 'crew', $id, ['members' => count($memberIds)]);
+    $crew = array_values(array_filter(crm_public_crews(), static fn(array $row): bool => $row['id'] === $id))[0];
+    crm_json(['ok' => true, 'crew' => $crew]);
 }
 
 if ($action === 'employees.save' && in_array($method, ['POST', 'PUT'], true)) {

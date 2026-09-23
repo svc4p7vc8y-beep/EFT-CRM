@@ -14,6 +14,7 @@ import { Attendance } from '../features/Attendance.jsx';
 import { ClientWorkspace } from '../features/ClientWorkspace.jsx';
 import { MyTasks } from '../features/MyTasks.jsx';
 import { RELEASE } from './operations.js';
+import { employeeFromApi } from './api.js';
 import './app.css';
 import './operations.css';
 
@@ -23,15 +24,16 @@ const navigation = [
   { id: 'supplies', label: 'Закупки и склад', icon: Package, separator: true }, { id: 'crews', label: 'Бригады', icon: HardHat }, { id: 'logistics', label: 'Логистика', icon: Truck, planned: true }, { id: 'settings', label: 'Настройки', icon: Settings2, separator: true },
 ];
 const getRoute = () => { const hash = window.location.hash.slice(1); const match = hash.match(/^client\/(.+)$/); if (match) return { page: 'client', leadId: decodeURIComponent(match[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '' }; };
-const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', crew: 'Монтажная бригада' };
+const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
 
 export function App({ runtime = { mode: 'demo' } }) {
   const { state, command, storageError, replace } = useWorkspace();
+  const liveSession = runtime.mode === 'server'; const sessionUser = runtime.user;
+  const personnelState = liveSession ? { ...state, employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [] } : state;
   const initialRoute = getRoute();
   const [page, setPage] = useState(initialRoute.page); const [search, setSearch] = useState(''); const [selectedLead, setSelectedLead] = useState(initialRoute.leadId); const [modal, setModal] = useState(null); const [toast, setToast] = useState(null); const [sidebar, setSidebar] = useState(false); const [now,setNow]=useState(()=>new Date());
   const selected = state.leads.find((l) => l.id === selectedLead);
-  const liveSession = runtime.mode === 'server'; const sessionUser = runtime.user;
   const late = state.leads.filter((l) => l.status !== 'lost' && isOverdue(l.dueAt)); const blocked = state.tasks.filter((t) => t.status === 'blocked');
   useEffect(() => { const change = () => { const route = getRoute(); setPage(route.page); if (route.leadId) setSelectedLead(route.leadId); setSearch(''); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [page, selectedLead]);
@@ -53,8 +55,8 @@ export function App({ runtime = { mode: 'demo' } }) {
   if (modal?.type === 'task' && modalTask) dialog = <Dialog title={modalTask.title} onClose={closeModal} wide><TaskDetail state={state} task={modalTask} onEdit={() => setModal({ type: 'task-edit', id: modalTask.id })} onCheck={(p) => safeMutate('task.check', p, 'Чек-лист обновлён')} onMove={moveTask} onComment={(p) => mutate('activity.create', p, 'Комментарий добавлен')} /></Dialog>;
   if (modal?.type === 'data') dialog = <Dialog title="Данные на этом устройстве" onClose={closeModal}><DataTools state={state} replace={replace} onClose={closeModal} /></Dialog>;
   if (modal?.type === 'profile') dialog = <Dialog title="Рабочий аккаунт" onClose={closeModal}><div className="form-content account-summary"><span className="profile-avatar">{initials(sessionUser?.displayName)}</span><div><strong>{sessionUser?.displayName}</strong><span>{roleLabels[sessionUser?.role] || sessionUser?.role}</span><small>Логин: {sessionUser?.username}</small></div><p><ShieldCheck size={17} />Сессия защищена. Права доступа назначаются администратором CRM.</p></div><footer className="dialog-actions"><button className="button" onClick={closeModal}>Закрыть</button><button className="button logout-button" onClick={runtime.onLogout}><LogOut size={16} />Выйти</button></footer></Dialog>;
-  if (modal?.type === 'employee-form') dialog = <Dialog key={`employee-${modal.id || 'new'}`} title={modal.id ? 'Редактировать сотрудника' : 'Новый сотрудник'} onClose={closeModal}><EmployeeForm person={state.employees.find((p) => p.id === modal.id)} onClose={closeModal} onSubmit={(p) => { mutate('employee.save', { ...p, id: modal.id }, 'Сотрудник сохранён'); closeModal(); }} /></Dialog>;
-  if (modal?.type === 'crew-form') dialog = <Dialog key={`crew-${modal.id || 'new'}`} title={modal.id ? 'Редактировать бригаду' : 'Новая бригада'} onClose={closeModal}><CrewForm state={state} crew={state.crews.find((c) => c.id === modal.id)} onClose={closeModal} onSubmit={(p) => { mutate('crew.save', { ...p, id: modal.id }, 'Бригада сохранена'); closeModal(); }} /></Dialog>;
+  if (modal?.type === 'employee-form') dialog = <Dialog key={`employee-${modal.id || 'new'}`} title={modal.id ? 'Редактировать сотрудника' : 'Новый сотрудник'} onClose={closeModal}><EmployeeForm person={personnelState.employees.find((p) => p.id === modal.id)} serverMode={liveSession} onClose={closeModal} onSubmit={async (p) => { if (liveSession) await runtime.saveEmployee({ ...p, id: modal.id }); else mutate('employee.save', { ...p, id: modal.id }, 'Сотрудник сохранён'); setToast({ text: 'Сотрудник сохранён', error: false }); closeModal(); }} /></Dialog>;
+  if (modal?.type === 'crew-form') dialog = <Dialog key={`crew-${modal.id || 'new'}`} title={modal.id ? 'Редактировать бригаду' : 'Новая бригада'} onClose={closeModal}><CrewForm state={personnelState} crew={personnelState.crews.find((c) => c.id === modal.id)} onClose={closeModal} onSubmit={async (p) => { if (liveSession) await runtime.saveCrew({ ...p, id: modal.id }); else mutate('crew.save', { ...p, id: modal.id }, 'Бригада сохранена'); setToast({ text: 'Бригада сохранена', error: false }); closeModal(); }} /></Dialog>;
   if (modal?.type === 'notifications') dialog = <Dialog title="Требуют внимания" onClose={closeModal}><div className="form-content">{!late.length && !blocked.length ? <p>Просроченных контактов и блокировок нет.</p> : null}{late.map((l) => <button className="action-row" key={l.id} onClick={() => { openLead(l.id); closeModal(); }}><CalendarDays size={18} /><div><strong>{leadContext(state, l).client.name}</strong><span>{l.nextAction}</span></div></button>)}{blocked.map((t) => <button className="action-row" key={t.id} onClick={() => setModal({ type: 'task', id: t.id })}><AlertCircle size={18} /><div><strong>{t.title}</strong><span>{t.blockReason}</span></div></button>)}</div></Dialog>;
   if (modal?.type === 'planned') dialog = <Dialog title={navigation.find((n) => n.id === modal.id)?.label} onClose={closeModal}><div className="form-content"><p className="data-explanation">Этот раздел входит в следующие этапы разработки.</p><p>{modal.id === 'supplies' ? 'Потребности по объектам, заказы поставщикам, приёмка, резервы, выдача материалов и учёт инструмента.' : modal.id === 'crews' ? 'Состав бригад, специализации, назначение на строительные этапы и проверка занятости.' : 'Комплектация, рейсы, окна доставки и подтверждение приёмки на объекте.'}</p><p className="muted small">Сейчас доступны заявки, клиенты, история общения, цех, задачи и календарь.</p></div><footer className="dialog-actions"><button className="button primary" onClick={closeModal}>Понятно</button></footer></Dialog>;
   const taskProps = { state, search, onCreate: (orderId) => setModal({ type: 'task-new', orderId }), onOpen: (id) => setModal({ type: 'task', id }), onMove: moveTask };
@@ -73,9 +75,9 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={command} search={search}/> : null}
-      {page === 'attendance' ? <Attendance state={state} command={command} search={search} runtime={runtime}/> : null}
+      {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
-      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={state} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} runtime={runtime} /> : null}
+      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} runtime={runtime} /> : null}
     </main></div>{dialog}{toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19} /> : <CircleCheck size={19} />}<span>{toast.text}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="Закрыть уведомление"><X size={15} /></button></div> : null}
   </div>;
 }

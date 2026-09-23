@@ -2,6 +2,15 @@ const API_URL = String(import.meta.env.VITE_CRM_API_URL || '').trim();
 
 export const serverMode = API_URL !== '';
 
+const avatarKey = (value = '') => /^employee-(0[1-9]|1[0-5])\.jpg$/.test(value) ? value : 'employee-01.jpg';
+export function employeeFromApi(employee) {
+  const name = String(employee?.name || '');
+  return { ...employee, initials: name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase(), avatar: `./avatars/${avatarKey(employee?.avatarKey)}`, payRate: Number(employee?.payRate || 0), advanceAmount: Number(employee?.advanceAmount || 0) };
+}
+export function employeeToApi(employee) {
+  return { ...employee, avatarKey: avatarKey(String(employee?.avatar || '').split('/').pop()) };
+}
+
 export class ApiError extends Error {
   constructor(message, { code = 'request_failed', status = 0 } = {}) {
     super(message);
@@ -61,6 +70,7 @@ export const crmApi = {
   logout: () => request('logout', { method: 'POST', body: {} }),
   bootstrap: (signal) => request('bootstrap', { signal }),
   saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
+  saveCrew: (crew) => request('crews.save', { method: crew.id ? 'PUT' : 'POST', body: crew }),
   attendance: (month, employeeId = '', signal) => request('attendance.list', { signal, query: { month, employeeId } }),
   saveAttendance: (entry) => request('attendance.save', { method: entry.id ? 'PUT' : 'POST', body: entry }),
   payroll: (month, signal) => request('payroll', { signal, query: { month } }),

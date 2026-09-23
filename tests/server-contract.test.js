@@ -17,6 +17,8 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(bootstrap, /if \(\$includeFinance\)/);
   assert.match(api, /employees\.save/);
   assert.match(api, /attendance\.list/);
+  assert.match(api, /crews\.save/);
+  assert.match(bootstrap, /function crm_public_crews/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);
 });

@@ -4,8 +4,8 @@ import { Dialog } from './UI.jsx';
 import { RELEASE } from '../app/operations.js';
 
 export function EntryForm({ children, onSubmit, onClose, label = 'Сохранить' }) {
-  const [error, setError] = useState('');
-  return <form onSubmit={(e) => { e.preventDefault(); try { setError(''); onSubmit(Object.fromEntries(new FormData(e.currentTarget))); } catch (err) { setError(err.message); } }}><div className="form-content"><div className="form-grid">{children}</div>{error ? <p className="form-error" role="alert">{error}</p> : null}</div><footer className="dialog-actions"><button type="button" className="button" onClick={onClose}>Отмена</button><button className="button primary">{label}</button></footer></form>;
+  const [error, setError] = useState(''); const [busy,setBusy]=useState(false);
+  return <form onSubmit={async (e) => { e.preventDefault(); setError(''); setBusy(true); try { await onSubmit(Object.fromEntries(new FormData(e.currentTarget))); } catch (err) { setError(err.message); setBusy(false); } }}><div className="form-content"><div className="form-grid">{children}</div>{error ? <p className="form-error" role="alert">{error}</p> : null}</div><footer className="dialog-actions"><button type="button" className="button" onClick={onClose} disabled={busy}>Отмена</button><button className="button primary" disabled={busy}>{busy?'Сохраняем…':label}</button></footer></form>;
 }
 export function downloadCSV(title, headers, rows) {
   const cell = (value) => { let s = String(value ?? ''); if (/^[=+@\-\t\r]/.test(s)) s = "'" + s; return '"' + s.replaceAll('"', '""') + '"'; };

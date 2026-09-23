@@ -5,14 +5,14 @@ import { EMPLOYEE_AVATARS, STAFF_ROLES, employee } from '../app/model.js';
 import './staff-settings.css';
 
 function SettingsForm({ children, onSubmit, onClose }) {
-  const [error, setError] = useState('');
-  return <form onSubmit={(event) => { event.preventDefault(); setError(''); try { onSubmit(new FormData(event.currentTarget)); } catch (e) { setError(e.message); } }}>
+  const [error, setError] = useState(''); const [busy,setBusy]=useState(false);
+  return <form onSubmit={async (event) => { event.preventDefault(); setError(''); setBusy(true); try { await onSubmit(new FormData(event.currentTarget)); } catch (e) { setError(e.message); setBusy(false); } }}>
     <div className="form-content">{children}{error ? <p className="form-error" role="alert">{error}</p> : null}</div>
-    <footer className="dialog-actions"><button className="button" type="button" onClick={onClose}>Отмена</button><button className="button primary" type="submit">Сохранить</button></footer>
+    <footer className="dialog-actions"><button className="button" type="button" onClick={onClose} disabled={busy}>Отмена</button><button className="button primary" type="submit" disabled={busy}>{busy?'Сохраняем…':'Сохранить'}</button></footer>
   </form>;
 }
 
-export function EmployeeForm({ person, onSubmit, onClose }) {
+export function EmployeeForm({ person, onSubmit, onClose, serverMode=false }) {
   return <SettingsForm onClose={onClose} onSubmit={(data) => onSubmit({ name: data.get('name'), role: data.get('role'), department: data.get('department'), phone: data.get('phone'), email: data.get('email'), notes: data.get('notes'), avatar: data.get('avatar'), attendanceMode: data.get('attendanceMode'), active: data.has('active') })}>
     <div className="form-grid">
       <fieldset className="avatar-picker field-wide"><legend>Фотография сотрудника</legend><div>{EMPLOYEE_AVATARS.map((avatar, index) => <label key={avatar}><input type="radio" name="avatar" value={avatar} defaultChecked={(person?.avatar || EMPLOYEE_AVATARS[0]) === avatar} /><img src={avatar} alt={`Рисованный аватар ${index + 1}`} /></label>)}</div><small>15 вымышленных рисованных портретов: 12 мужских и 3 женских.</small></fieldset>
@@ -24,7 +24,7 @@ export function EmployeeForm({ person, onSubmit, onClose }) {
       <Field label="Учёт в табеле"><select name="attendanceMode" defaultValue={person?.attendanceMode || 'hours'}><option value="hours">Считать рабочие часы</option><option value="days">Ставить «+» за рабочий день</option></select></Field>
       <Field label="Примечание" wide><textarea name="notes" maxLength={2000} rows={3} defaultValue={person?.notes || ''} placeholder="Специализация, зона ответственности" /></Field>
       <label className="check-row field-wide"><input type="checkbox" name="active" defaultChecked={person?.active !== false} />Активный сотрудник</label>
-      <p className="form-hint field-wide">Ознакомительная версия хранит записи в этом браузере. Здесь не следует вводить паспортные данные и загружать документы.</p>
+      <p className="form-hint field-wide">{serverMode?'Запись будет сохранена в закрытой базе CRM. Копии документов добавляются только через отдельный защищённый раздел.':'Ознакомительная версия хранит записи в этом браузере. Здесь не следует вводить паспортные данные и загружать документы.'}</p>
     </div>
   </SettingsForm>;
 }

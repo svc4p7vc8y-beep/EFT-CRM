@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { App } from './App.jsx';
-import { crmApi, serverMode } from './api.js';
+import { crmApi, employeeToApi, serverMode } from './api.js';
 import { RELEASE } from './operations.js';
 import './auth.css';
 
@@ -76,7 +76,27 @@ export function AuthRoot() {
     setAuth({ status: 'ready', session: { ...session, authenticated: true }, workspace });
   }} />;
 
-  return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, serverData: auth.workspace, onLogout: async () => {
+  const updateWorkspace = (patch) => setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...patch } } : current);
+  const replaceEmployee = (employee) => setAuth((current) => {
+    if (current.status !== 'ready') return current;
+    const employees = [...(current.workspace.employees || [])]; const index = employees.findIndex((item) => item.id === employee.id);
+    if (index >= 0) employees[index] = employee; else employees.push(employee);
+    return { ...current, workspace: { ...current.workspace, employees } };
+  });
+  const replaceCrew = (crew) => setAuth((current) => {
+    if (current.status !== 'ready') return current;
+    const crews = [...(current.workspace.crews || [])]; const index = crews.findIndex((item) => item.id === crew.id);
+    if (index >= 0) crews[index] = crew; else crews.push(crew);
+    return { ...current, workspace: { ...current.workspace, crews } };
+  });
+
+  return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, serverData: auth.workspace,
+    saveEmployee: async (employee) => { const result = await crmApi.saveEmployee(employeeToApi(employee)); replaceEmployee(result.employee); return result.employee; },
+    saveCrew: async (crew) => { const result = await crmApi.saveCrew(crew); replaceCrew(result.crew); return result.crew; },
+    loadAttendance: async (month) => { const result = await crmApi.attendance(month); updateWorkspace({ attendance: result.attendance, attendanceMonth: month }); return result.attendance; },
+    saveAttendance: async (entry) => { const result = await crmApi.saveAttendance(entry); const attendance = [...(auth.workspace.attendance || [])]; const index = attendance.findIndex((item) => item.employeeId === result.attendance.employeeId && item.date === result.attendance.date); if (index >= 0) attendance[index] = result.attendance; else attendance.push(result.attendance); updateWorkspace({ attendance }); return result.attendance; },
+    saveRates: async (rows) => { for (const row of rows) { const employee = auth.workspace.employees.find((item) => item.id === row.id); if (employee) { const result = await crmApi.saveEmployee(employeeToApi({ ...employee, ...row })); replaceEmployee(result.employee); } } },
+    onLogout: async () => {
     try { await crmApi.logout(); } finally { crmApi.clearSession(); setAuth({ status: 'guest' }); }
   } }} />;
 }
