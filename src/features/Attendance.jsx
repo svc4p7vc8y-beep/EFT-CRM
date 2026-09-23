@@ -18,4 +18,3 @@ function AttendanceForm({state,entry,onClose,onSubmit}) {
   const [kind,setKind]=useState(entry.kind);
   return <EntryForm onClose={onClose} onSubmit={(p)=>onSubmit({...p,kind})}><Field label="Сотрудник" wide><select name="employeeId" required defaultValue={entry.employeeId||''}><option value="">Выберите сотрудника</option>{state.employees.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select></Field><Field label="Дата"><input name="date" type="date" required defaultValue={entry.date}/></Field><Field label="Отметка"><select value={kind} onChange={(e)=>setKind(e.target.value)}>{Object.entries(marks).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></Field>{kind==='work'?<Field label="Отработано часов"><input name="hours" type="number" min="0.01" max="24" step="0.01" required defaultValue={entry.hours||8}/></Field>:null}<Field label="Примечание" wide><textarea name="note" defaultValue={entry.note}/></Field></EntryForm>;
 }
-
