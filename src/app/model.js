@@ -1,3 +1,4 @@
+import { extendWorkspace, applyOperation, validateOperations } from './operations.js';
 export const STORAGE_KEY = 'eft-crm.workspace.v1';
 export const EMPLOYEES = [
   { id: 'manager-1', name: 'Иван Соколов', role: 'Менеджер', initials: 'ИС' },
@@ -52,13 +53,14 @@ export function createDemoState() {
   const tasks = titles.map((title, i) => ({ id: `task-${i + 1}`, orderId: orders[[0, 1, 2, 0, 1, 3][i]].id, title, description: i === 5 ? 'Запросить недостающий брус у снабжения.' : 'Выполнить по согласованной спецификации заказа. Результат передать на проверку.', assigneeId: `worker-${Math.min(i + 1, 5)}`, status: ['planned', 'planned', 'doing', 'doing', 'review', 'blocked'][i], priority: i === 5 ? 'high' : 'normal', dueAt: dueAt(0, ['16:00', '16:00', '18:00', '17:00', '15:00', '16:00'][i]), quantity: i === 0 ? 38 : i === 2 ? 24 : 1, completedQty: i === 2 ? 12 : i === 4 ? 1 : 0, unit: i === 0 || i === 2 ? 'панелей' : 'комплект', blockReason: i === 5 ? 'Не хватает бруса' : '', checklist: [{ id: `check-${i}-1`, title: 'Проверить спецификацию', done: i >= 2 }, { id: `check-${i}-2`, title: 'Подготовить результат к приёмке', done: i === 4 }], createdAt: stamp }));
   const activities = [{ id: 'activity-1', siteId: 'site-3', taskId: '', type: 'email', text: 'КП отправлено. Ожидаем ответ по комплектации.', createdAt: dueAt(-1, '10:24'), authorId: 'manager-1' }, { id: 'activity-2', siteId: 'site-3', taskId: '', type: 'call', text: 'Уточнена комплектация. Обсудили изменения в планировке.', createdAt: dueAt(-3, '14:17'), authorId: 'manager-1' }, { id: 'activity-3', siteId: 'site-3', taskId: '', type: 'system', text: 'Новая заявка с сайта', createdAt: dueAt(-5, '09:03'), authorId: 'manager-1' }];
   const employees = EMPLOYEES.map((person) => ({ ...person, department: person.role === 'Цех' ? 'Производство' : 'Офис', phone: '', email: '', active: true, notes: '' }));
-  return { schemaVersion: 1, revision: 0, clients, sites, leads, orders, tasks, activities, employees, crews: [] };
+  return extendWorkspace({ schemaVersion: 1, revision: 0, clients, sites, leads, orders, tasks, activities, employees, crews: [] });
 }
 
 function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1') { state.activities.unshift({ id: uid(), siteId, taskId, type, text: message, authorId, createdAt: new Date().toISOString() }); }
 export function applyCommand(current, action, payload = {}) {
-  const state = structuredClone(current);
-  if (action === 'lead.create') {
+  const state = extendWorkspace(structuredClone(current));
+  if (applyOperation(state, action, payload)) { /* Operation committed below with shared validation. */ }
+  else if (action === 'lead.create') {
     let client = state.clients.find((c) => c.id === payload.clientId);
     if (!client) { client = { id: uid(), name: requireText(payload.name, 'Клиент'), phone: text(payload.phone, 60), email: text(payload.email, 200) }; state.clients.push(client); }
     const site = { id: uid(), clientId: client.id, name: requireText(payload.siteName, 'Объект'), address: text(payload.address, 500) };
@@ -77,7 +79,7 @@ export function applyCommand(current, action, payload = {}) {
     client.name = requireText(payload.name, 'Клиент'); client.phone = text(payload.phone, 60); client.email = text(payload.email, 200);
     const site = state.sites.find((v) => v.id === payload.siteId); if (site) { site.address = text(payload.address, 500); site.name = requireText(payload.siteName, 'Объект'); log(state, site.id, 'Обновлены контакты и данные объекта'); }
   } else if (action === 'activity.create') {
-    if (!state.sites.some((v) => v.id === payload.siteId)) throw new Error('Выберите объект');
+    if (!state.sites.some((v) => v.id === payload.siteId) && !state.tasks.some((t) => t.id === payload.taskId && !t.orderId)) throw new Error('Выберите объект');
     if (!ACTIVITY_TYPES[payload.type] || payload.type === 'system') throw new Error('Выберите вид общения');
     log(state, payload.siteId, requireText(payload.text, 'Результат общения'), payload.taskId || '', payload.type);
   } else if (action === 'order.create') {
@@ -93,10 +95,11 @@ export function applyCommand(current, action, payload = {}) {
   } else if (action === 'task.create' || action === 'task.update') {
     const existing = state.tasks.find((v) => v.id === payload.id);
     if (action === 'task.update' && !existing) throw new Error('Задание не найдено');
-    const task = existing || { id: uid(), createdAt: new Date().toISOString(), checklist: [], status: 'planned', completedQty: 0, blockReason: '' };
+    const template = state.taskTemplates.find((t) => t.id === payload.templateId);
+    const task = existing || { id: uid(), createdAt: new Date().toISOString(), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '' };
     const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason'].includes(key))) };
     next.title = requireText(next.title, 'Название задания'); next.description = text(next.description); next.unit = requireText(next.unit, 'Единица'); next.blockReason = text(next.blockReason);
-    if (!state.orders.some((v) => v.id === next.orderId)) throw new Error('Выберите заказ');
+    if (next.orderId && !state.orders.some((v) => v.id === next.orderId)) throw new Error('Выберите заказ');
     if (!TASK_STAGES.some((v) => v.id === next.status)) throw new Error('Неизвестный статус задания');
     if (next.status === 'blocked' && !next.blockReason) throw new Error('Укажите причину блокировки');
     if (next.status !== 'blocked') next.blockReason = '';
@@ -107,7 +110,7 @@ export function applyCommand(current, action, payload = {}) {
       next.completedQty = next.quantity;
     }
     if (existing) Object.assign(existing, next); else state.tasks.unshift(next);
-    log(state, state.orders.find((o) => o.id === next.orderId).siteId, existing ? `${next.title}: ${TASK_STAGES.find((s) => s.id === next.status).label}` : `Создано задание: ${next.title}`, next.id);
+    log(state, state.orders.find((o) => o.id === next.orderId)?.siteId || '', existing ? `${next.title}: ${TASK_STAGES.find((s) => s.id === next.status).label}` : `Создано задание: ${next.title}`, next.id);
   } else if (action === 'employee.save') {
     const existing = state.employees.find((person) => person.id === payload.id);
     const name = requireText(payload.name, 'Имя сотрудника').slice(0, 200);
@@ -127,7 +130,7 @@ export function applyCommand(current, action, payload = {}) {
     if (task.status === 'done') throw new Error('Сначала верните задание в работу');
     if (payload.checkId) { const item = task.checklist.find((v) => v.id === payload.checkId); if (item) item.done = !item.done; }
     else task.checklist.push({ id: uid(), title: requireText(payload.title, 'Пункт чек-листа'), done: false });
-    log(state, state.orders.find((v) => v.id === task.orderId).siteId, `Обновлён чек-лист: ${task.title}`, task.id);
+    log(state, state.orders.find((v) => v.id === task.orderId)?.siteId || '', `Обновлён чек-лист: ${task.title}`, task.id);
   } else throw new Error('Неизвестное действие');
   state.revision += 1;
   validateState(state);
@@ -138,6 +141,7 @@ export function validateState(state) {
   if (!state || state.schemaVersion !== 1 || !Number.isInteger(state.revision) || state.revision < 0) throw new Error('Неподдерживаемый формат данных');
   if (state.employees === undefined) state.employees = createDemoState().employees;
   if (state.crews === undefined) state.crews = [];
+  extendWorkspace(state);
   const fields = { clients: ['id', 'name', 'phone', 'email'], sites: ['id', 'clientId', 'name', 'address'], leads: ['id', 'siteId', 'status', 'ownerId', 'nextAction', 'dueAt', 'source', 'notes', 'createdAt'], orders: ['id', 'number', 'siteId', 'leadId', 'scope', 'reference', 'approvedBy', 'approvedAt', 'createdAt'], tasks: ['id', 'orderId', 'title', 'description', 'assigneeId', 'status', 'priority', 'dueAt', 'unit', 'blockReason', 'createdAt'], activities: ['id', 'siteId', 'taskId', 'type', 'text', 'createdAt', 'authorId'] };
   for (const [table, columns] of Object.entries(fields)) {
     if (!Array.isArray(state[table]) || state[table].length > 20000) throw new Error(`Неверный раздел данных: ${table}`);
@@ -150,9 +154,10 @@ export function validateState(state) {
   if (state.sites.some((s) => !has('clients', s.clientId)) || state.leads.some((l) => !has('sites', l.siteId) || !has('employees', l.ownerId) || !LEAD_STAGES.some((v) => v.id === l.status)) || state.orders.some((o) => !has('sites', o.siteId) || (o.leadId && !has('leads', o.leadId)))) throw new Error('Нарушены связи клиентов, заявок и заказов');
   for (const lead of state.leads) validDue(lead.dueAt);
   for (const task of state.tasks) {
-    if (!has('orders', task.orderId) || (task.assigneeId && !has('employees', task.assigneeId)) || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean')) throw new Error('Некорректное производственное задание');
+    if ((task.orderId && !has('orders', task.orderId)) || (task.assigneeId && !has('employees', task.assigneeId)) || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean')) throw new Error('Некорректное производственное задание');
     validDue(task.dueAt);
   }
-  if (state.activities.some((a) => !has('sites', a.siteId) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
+  if (state.activities.some((a) => (!has('sites', a.siteId) && !(a.taskId && state.tasks.some((t) => t.id === a.taskId && !t.orderId))) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
+  validateOperations(state);
   return state;
 }
