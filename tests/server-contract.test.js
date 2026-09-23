@@ -26,3 +26,12 @@ test('автопубликация Beget не передаёт секретну�
   assert.match(workflow, /test -f '.+api\/config\.local\.php'/);
   assert.match(ignore, /server\/\*\*\/config\.local\.php/);
 });
+
+test('одноразовый установщик закрывается после создания конфигурации', () => {
+  const installer = read('server/beget-api/install.php');
+  assert.match(installer, /is_file\(\$configPath\)/);
+  assert.match(installer, /hash_equals\(\(string\)\$_SESSION\['install_csrf'\]/);
+  assert.match(installer, /password_hash\(\$adminPassword, PASSWORD_DEFAULT\)/);
+  assert.match(installer, /rename\(\$temporaryPath, \$configPath\)/);
+  assert.doesNotMatch(installer, /echo\s+\$dbPassword/);
+});
