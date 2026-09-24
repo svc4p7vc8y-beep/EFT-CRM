@@ -33,6 +33,9 @@ test('импорт отбрасывает повреждённые связи и
   state.tasks[0].orderId = 'missing'; assert.throws(() => validateState(state), /задание/);
   state.tasks[0].orderId = 'order-1'; state.tasks[0].quantity = null; assert.throws(() => validateState(state), /задание/);
 });
+test('серверная заявка может временно оставаться без назначенного менеджера', () => {
+  const state=createDemoState();state.leads[0].ownerId='';assert.doesNotThrow(()=>validateState(state));
+});
 test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
   let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });
   const person = state.employees.at(-1);
