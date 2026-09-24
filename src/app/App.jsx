@@ -89,7 +89,8 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (!liveSession) { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
     if (coreServerActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
     if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
-    const next = applyCommand(state, action, payload); replace(next);
+    const next = applyCommand(state, action, payload);
+    if (!coreServerActions.has(action) && !inventoryServerActions.has(action)) replace(next);
     if (!inventoryServerActions.has(action)) setToast({ text: message, error: false });
     if (coreServerActions.has(action) && runtime.saveWorkspace) {
       const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities, constructionStages: next.constructionStages, logistics: next.logistics };

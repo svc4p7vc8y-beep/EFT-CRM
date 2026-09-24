@@ -84,3 +84,9 @@ test('закупки подтверждают серверное сохране�
   assert.match(inventory, /async function commit\(action,payload\) \{ await command\(action,payload\); close\(\)/);
   assert.match(inventory, /Сохранено в базе данных/);
 });
+
+test('серверные закупки не зависят от локальной копии браузера', () => {
+  const app = read('src/app/App.jsx');
+  assert.match(app, /if \(!coreServerActions\.has\(action\) && !inventoryServerActions\.has\(action\)\) replace\(next\)/);
+  assert.doesNotMatch(app, /applyCommand\(state, action, payload\); replace\(next\)/);
+});
