@@ -36,6 +36,10 @@ test('импорт отбрасывает повреждённые связи и
 test('серверная заявка может временно оставаться без назначенного менеджера', () => {
   const state=createDemoState();state.leads[0].ownerId='';assert.doesNotThrow(()=>validateState(state));
 });
+test('общая задача может быть без исполнителя и срока', () => {
+  const state=applyCommand(createDemoState(),'task.create',{title:'Распределить новую задачу',description:'',orderId:'',siteId:'',assigneeId:'',dueAt:'',quantity:1,completedQty:0,unit:'задача',priority:'normal',status:'planned'});
+  assert.equal(state.tasks[0].assigneeId,'');assert.equal(state.tasks[0].dueAt,'');assert.doesNotThrow(()=>validateState(state));
+});
 test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
   let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });
   const person = state.employees.at(-1);
