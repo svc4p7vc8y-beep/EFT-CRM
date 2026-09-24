@@ -75,6 +75,7 @@ export const crmApi = {
   login: (username, password) => request('login', { method: 'POST', body: { username, password } }),
   logout: () => request('logout', { method: 'POST', body: {} }),
   bootstrap: (signal) => request('bootstrap', { signal }),
+  saveWorkspace: (workspace, baseRevision, initialize = false) => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize } }),
   saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
   uploadEmployeePhoto: (employeeId, file) => {
     const body = new FormData();

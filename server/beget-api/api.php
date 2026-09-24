@@ -67,6 +67,7 @@ if ($action === 'logout' && $method === 'POST') {
 
 if ($action === 'bootstrap' && $method === 'GET') {
     $user = crm_user();
+    crm_schema_ensure_v29();
     $canSeeAll = crm_can($user, 'employees.view') || crm_can($user, 'employees.manage') || crm_can($user, 'attendance.manage') || crm_can($user, 'finance.view');
     if ($canSeeAll) {
         $rows = crm_db()->query('SELECT * FROM crm_employees ORDER BY active DESC, full_name')->fetchAll();
@@ -80,7 +81,8 @@ if ($action === 'bootstrap' && $method === 'GET') {
     $includeFinance = crm_can($user, 'finance.view') && crm_finance_unlocked();
     $includeCrews = crm_can($user, 'crews.view') || crm_can($user, 'crews.manage');
     $includeUsers = crm_can($user, 'users.manage');
-    crm_json([
+    $workspace = crm_workspace_for_user($user);
+    crm_json(array_merge([
         'ok' => true,
         'user' => $user,
         'capabilities' => crm_capabilities((string)$user['role']),
@@ -88,7 +90,19 @@ if ($action === 'bootstrap' && $method === 'GET') {
         'employees' => array_map(static fn(array $row): array => crm_public_employee($row, $includeFinance), $rows),
         'crews' => $includeCrews ? crm_public_crews() : [],
         'users' => $includeUsers ? array_map('crm_public_user', crm_db()->query('SELECT id, username, display_name, role, employee_id, active, last_login_at FROM crm_users ORDER BY active DESC, display_name')->fetchAll()) : [],
-    ]);
+    ], $workspace));
+}
+
+if ($action === 'workspace.save' && $method === 'PUT') {
+    crm_require_origin();
+    $user = crm_user();
+    if (!crm_can($user, 'clients.manage') || !crm_can($user, 'tasks.manage')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав для изменения общего рабочего пространства.'], 403);
+    crm_csrf();
+    $input = crm_input(8 * 1024 * 1024);
+    $baseRevision = filter_var($input['baseRevision'] ?? null, FILTER_VALIDATE_INT);
+    if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию данных. Обновите страницу.'], 422);
+    $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']));
+    crm_json(array_merge(['ok' => true], $workspace));
 }
 
 if ($action === 'finance.unlock' && $method === 'POST') {

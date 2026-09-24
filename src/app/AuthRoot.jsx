@@ -102,6 +102,12 @@ export function AuthRoot() {
   });
 
   return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, financeUnlocked: Boolean(auth.workspace.financeUnlocked), serverData: auth.workspace,
+    saveWorkspace: async (workspace, baseRevision, initialize = false) => {
+      const result = await crmApi.saveWorkspace(workspace, baseRevision, initialize);
+      updateWorkspace(result);
+      return initialize ? refreshWorkspace() : result;
+    },
+    refreshWorkspace,
     saveEmployee: async (employee) => {
       const result = await crmApi.saveEmployee(employeeToApi(employee));
       let saved = result.employee;

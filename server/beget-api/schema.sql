@@ -97,8 +97,11 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   public_number VARCHAR(32) NOT NULL,
   status ENUM('new','in_progress','calculation','offer','approval','contract','won','lost') NOT NULL DEFAULT 'new',
   owner_id BIGINT UNSIGNED NULL,
+  owner_employee_id CHAR(36) NULL,
   next_action VARCHAR(250) NOT NULL DEFAULT '',
   next_action_at DATETIME NULL,
+  source VARCHAR(120) NOT NULL DEFAULT '',
+  notes TEXT NOT NULL,
   source_inquiry_id CHAR(36) NULL,
   source_inquiry_number VARCHAR(32) NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -111,8 +114,28 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   CONSTRAINT fk_crm_leads_owner FOREIGN KEY (owner_id) REFERENCES crm_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_orders (
+  id CHAR(36) NOT NULL,
+  public_number VARCHAR(32) NOT NULL,
+  site_id CHAR(36) NOT NULL,
+  lead_id CHAR(36) NULL,
+  scope TEXT NOT NULL,
+  reference_text VARCHAR(1000) NOT NULL DEFAULT '',
+  approved_by_employee_id CHAR(36) NULL,
+  approved_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_orders_number (public_number),
+  KEY idx_crm_orders_site (site_id, created_at),
+  CONSTRAINT fk_crm_orders_site FOREIGN KEY (site_id) REFERENCES crm_sites(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_orders_lead FOREIGN KEY (lead_id) REFERENCES crm_leads(id) ON DELETE SET NULL,
+  CONSTRAINT fk_crm_orders_approved_by FOREIGN KEY (approved_by_employee_id) REFERENCES crm_employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crm_tasks (
   id CHAR(36) NOT NULL,
+  order_id CHAR(36) NULL,
   title VARCHAR(250) NOT NULL,
   description TEXT NOT NULL,
   site_id CHAR(36) NULL,
@@ -121,6 +144,13 @@ CREATE TABLE IF NOT EXISTS crm_tasks (
   status ENUM('planned','doing','review','blocked','done') NOT NULL DEFAULT 'planned',
   priority ENUM('normal','high') NOT NULL DEFAULT 'normal',
   due_at DATETIME NULL,
+  quantity DECIMAL(12,2) NOT NULL DEFAULT 1,
+  completed_quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unit_name VARCHAR(80) NOT NULL DEFAULT 'задача',
+  block_reason TEXT NOT NULL,
+  checklist_json JSON NULL,
+  original_due_at DATETIME NULL,
+  reschedule_history_json JSON NULL,
   created_by BIGINT UNSIGNED NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -153,6 +183,8 @@ CREATE TABLE IF NOT EXISTS crm_attendance (
 CREATE TABLE IF NOT EXISTS crm_communications (
   id CHAR(36) NOT NULL,
   site_id CHAR(36) NULL,
+  task_id CHAR(36) NULL,
+  activity_type VARCHAR(32) NOT NULL DEFAULT 'note',
   channel ENUM('note','call','email','telegram','whatsapp','max','system') NOT NULL,
   direction ENUM('internal','incoming','outgoing') NOT NULL DEFAULT 'internal',
   external_key VARCHAR(255) NOT NULL DEFAULT '',
@@ -160,6 +192,7 @@ CREATE TABLE IF NOT EXISTS crm_communications (
   body MEDIUMTEXT NOT NULL,
   occurred_at DATETIME NOT NULL,
   author_id BIGINT UNSIGNED NULL,
+  author_employee_id CHAR(36) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_crm_communications_external (channel, external_key),

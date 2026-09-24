@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, Search, ChevronDown, Home, ClipboardList, Users, MessageSquare, Factory, CheckSquare, CalendarDays, Package, HardHat, Truck, Database, Menu, X, CircleCheck, AlertCircle, Settings2, LogOut, ShieldCheck } from 'lucide-react';
 import { useWorkspace } from './useWorkspace.js';
-import { employee, isOverdue, leadContext } from './model.js';
+import { applyCommand, employee, isOverdue, leadContext } from './model.js';
 import { Dialog, VoiceInput } from '../components/UI.jsx';
 import { ThemeSwitcher } from '../components/ThemeSwitcher.jsx';
 import { ActivityForm, ClientForm, DataTools, LeadForm, OrderForm, TaskForm } from '../components/Forms.jsx';
@@ -27,11 +27,19 @@ const navigation = [
 const getRoute = () => { const hash = window.location.hash.slice(1); const match = hash.match(/^client\/(.+)$/); if (match) return { page: 'client', leadId: decodeURIComponent(match[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '' }; };
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
+const serverActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check']);
 
 export function App({ runtime = { mode: 'demo' } }) {
-  const { state, command, storageError, replace } = useWorkspace();
+  const { state: localState, command, storageError, replace } = useWorkspace();
   const liveSession = runtime.mode === 'server'; const sessionUser = runtime.user;
-  const personnelState = liveSession ? { ...state, employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [] } : state;
+  const canSaveWorkspace = !liveSession || runtime.capabilities?.includes('*') || (runtime.capabilities?.includes('clients.manage') && runtime.capabilities?.includes('tasks.manage'));
+  const [serverOverride, setServerOverride] = useState(null);
+  const revisionRef = useRef(Number(runtime.serverData?.workspaceRevision || 0));
+  const saveQueue = useRef(Promise.resolve());
+  const initializing = useRef(false);
+  const serverCore = serverOverride || runtime.serverData || {};
+  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [] } : localState;
+  const personnelState = state;
   const initialRoute = getRoute();
   const themeKey = `eft-crm-theme:${sessionUser?.username || 'local'}`;
   const [page, setPage] = useState(initialRoute.page); const [search, setSearch] = useState(''); const [selectedLead, setSelectedLead] = useState(initialRoute.leadId); const [modal, setModal] = useState(null); const [toast, setToast] = useState(null); const [sidebar, setSidebar] = useState(false); const [now,setNow]=useState(()=>new Date());
@@ -43,8 +51,32 @@ export function App({ runtime = { mode: 'demo' } }) {
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 4500); return () => clearTimeout(id); }, [toast]);
   useEffect(() => { const id=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(id); }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem(themeKey, theme); const color = theme === 'dark' ? '#101820' : theme === 'brand' ? '#282b27' : '#142b3b'; document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color); }, [theme, themeKey]);
+  useEffect(() => { revisionRef.current = Number(runtime.serverData?.workspaceRevision || revisionRef.current); }, [runtime.serverData?.workspaceRevision]);
+  useEffect(() => {
+    if (!liveSession || !canSaveWorkspace || runtime.serverData?.workspaceInitialized !== false || initializing.current || !runtime.saveWorkspace) return;
+    initializing.current = true;
+    const initial = { ...localState, employees: localState.employees || [] };
+    runtime.saveWorkspace(initial, Number(runtime.serverData?.workspaceRevision || 0), true).then((saved) => {
+      revisionRef.current = saved.workspaceRevision; setServerOverride(saved); setToast({ text: 'Данные этого устройства перенесены на сервер', error: false });
+    }).catch((error) => setToast({ text: error.message, error: true }));
+  }, [canSaveWorkspace, liveSession, localState, runtime]);
   function navigate(id) { const item = navigation.find((v) => v.id === id); if (item?.planned) { setModal({ type: 'planned', id }); return; } setPage(id); setSearch(''); setSidebar(false); window.location.hash = id; }
-  function mutate(action, payload, message = 'Сохранено') { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
+  function mutate(action, payload, message = 'Сохранено') {
+    if (!liveSession) { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
+    if (serverActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
+    const next = applyCommand(state, action, payload); replace(next); setToast({ text: message, error: false });
+    if (serverActions.has(action) && runtime.saveWorkspace) {
+      const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities };
+      setServerOverride(snapshot);
+      saveQueue.current = saveQueue.current.then(() => runtime.saveWorkspace(snapshot, revisionRef.current, false)).then((saved) => {
+        revisionRef.current = saved.workspaceRevision; setServerOverride(saved);
+      }).catch(async (error) => {
+        setToast({ text: error.message, error: true });
+        try { const fresh = await runtime.refreshWorkspace?.(); if (fresh) { revisionRef.current = fresh.workspaceRevision; setServerOverride(fresh); } } catch { /* The original error is more useful. */ }
+      });
+    }
+    return next;
+  }
   function safeMutate(action, payload, message) { try { mutate(action, payload, message); return true; } catch (e) { setToast({ text: e.message, error: true }); return false; } }
   function openLead(id) { if (!id) return; setSelectedLead(id); setPage('client'); setSearch(''); setSidebar(false); window.location.hash = `client/${encodeURIComponent(id)}`; }
   function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
@@ -71,10 +103,10 @@ export function App({ runtime = { mode: 'demo' } }) {
     {storageError ? <div className="storage-error" role="alert">{storageError}<button onClick={() => setModal({ type: 'data' })}>Открыть данные</button></div> : null}
     <main className="workspace-body">
       {page === 'leads' ? <Leads state={state} search={search} selectedId="" onSelect={openLead} onCreate={() => setModal({ type: 'lead-new' })} onEdit={(id) => setModal({ type: 'lead-edit', id })} onChangeStage={(id, status) => safeMutate('lead.update', { id, status }, 'Этап обновлён')} /> : null}
-      {page === 'client' && selected ? <ClientWorkspace key={selected.id} state={state} lead={selected} command={command} onBack={() => navigate('leads')} onEditLead={() => setModal({ type: 'lead-edit', id: selected.id })} onEditClient={() => setModal({ type: 'client-edit', id: selected.id })} onTransfer={() => setModal({ type: 'order', id: selected.id })} onOpenTask={(id) => setModal({ type: 'task', id })} notify={(text, error = false) => setToast({ text, error })} /> : null}
+      {page === 'client' && selected ? <ClientWorkspace key={selected.id} state={state} lead={selected} command={mutate} onBack={() => navigate('leads')} onEditLead={() => setModal({ type: 'lead-edit', id: selected.id })} onEditClient={() => setModal({ type: 'client-edit', id: selected.id })} onTransfer={() => setModal({ type: 'order', id: selected.id })} onOpenTask={(id) => setModal({ type: 'task', id })} notify={(text, error = false) => setToast({ text, error })} /> : null}
       {page === 'client' && !selected ? <section className="page"><p>Заявка не найдена.</p><button className="button" onClick={() => navigate('leads')}>Вернуться к заявкам</button></section> : null}
       {page === 'production' ? <Production key={page} {...taskProps} /> : null}
-      {page === 'tasks' ? <MyTasks state={state} search={search} command={command} onCreate={() => setModal({ type: 'task-new' })} onOpen={(id) => setModal({ type: 'task', id })} onMove={moveTask} /> : null}
+      {page === 'tasks' ? <MyTasks state={state} search={search} command={mutate} onCreate={() => setModal({ type: 'task-new' })} onOpen={(id) => setModal({ type: 'task', id })} onMove={moveTask} /> : null}
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}

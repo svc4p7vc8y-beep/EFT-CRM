@@ -17,6 +17,13 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(api, /crm_require_finance_unlocked/);
   assert.match(api, /users\.save/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_settings/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_orders/);
+  assert.match(schema, /checklist_json/);
+  assert.match(api, /workspace\.save/);
+  assert.match(bootstrap, /workspace_conflict/);
+  assert.match(bootstrap, /function crm_public_workspace/);
+  assert.match(bootstrap, /function crm_workspace_for_user/);
+  assert.match(bootstrap, /function crm_workspace_save/);
   assert.doesNotMatch(api, /password.*911/);
   assert.match(api, /Можно заполнять только свой табель/);
   assert.match(bootstrap, /if \(\$includeFinance\)/);
