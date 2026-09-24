@@ -20,6 +20,7 @@ import { RELEASE } from './operations.js';
 import { employeeFromApi } from './api.js';
 import './app.css';
 import './operations.css';
+import '../features/communications.css';
 
 const navigation = [
   { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'construction', label: 'Строительство', icon: House }, { id: 'communications', label: 'Общение', icon: MessageSquare },
@@ -29,7 +30,7 @@ const navigation = [
 const getRoute = () => { const hash = window.location.hash.slice(1); const client = hash.match(/^client\/(.+)$/); if (client) return { page: 'client', leadId: decodeURIComponent(client[1]), siteId: '' }; const construction = hash.match(/^construction\/(.+)$/); if (construction) return { page: 'construction', leadId: '', siteId: decodeURIComponent(construction[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '', siteId: '' }; };
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
-const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment','logistics.save']);
+const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','communication.send','communication.read','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment','logistics.save']);
 const inventoryServerActions = new Set(['material.save','supplier.save','need.save','purchase.create','stock.post','tool.save','tool.transfer']);
 
 export function App({ runtime = { mode: 'demo' } }) {
@@ -151,7 +152,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
-      {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
+      {page === 'communications' ? <Communications state={state} search={search} command={mutate} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'logistics' ? <Logistics state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}

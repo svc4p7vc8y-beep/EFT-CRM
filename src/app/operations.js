@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 34;
+export const RELEASE = 35;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -30,6 +30,11 @@ export function extendWorkspace(state) {
   });
   state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; person.advanceAmount ??= 0; });
   state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; task.siteId ||= state.orders?.find((order) => order.id === task.orderId)?.siteId || ''; task.crewId ??= ''; task.constructionStageId ??= ''; });
+  state.activities?.forEach((item) => {
+    item.channel ??= item.type === 'email' ? 'email' : item.type === 'call' ? 'call' : item.type === 'message' ? 'telegram' : item.type === 'system' ? 'system' : 'note';
+    item.direction ??= ['system', 'note', 'call'].includes(item.channel) ? 'internal' : 'outgoing';
+    item.subject ??= ''; item.externalKey ??= ''; item.read ??= true; item.attachments ??= [];
+  });
   state.constructionStages?.forEach((stage) => { stage.dependencyIds ??= []; stage.comments ??= []; stage.attachments ??= []; stage.notes ??= ''; stage.blockReason ??= ''; stage.actualStart ??= ''; stage.actualFinish ??= ''; stage.assigneeId ??= ''; stage.crewId ??= ''; });
   return state;
 }
@@ -49,7 +54,16 @@ function linesFrom(state, lines) {
   return lines.map((line) => { const item = state.materials.find((m) => m.id === line.itemId); if (!item || seen.has(item.id)) throw new Error('Позиция не найдена или повторяется'); seen.add(item.id); return { itemId: item.id, name: item.name, unit: item.unit, quantity: num(line.quantity, 0.01, 1e6), price: round(num(line.price)) }; });
 }
 export function applyOperation(state, action, payload) {
-  if (action === 'logistics.save') {
+  if (action === 'communication.send') {
+    if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Выберите клиента и объект');
+    if (!['note','call','email','telegram','whatsapp','max'].includes(payload.channel)) throw new Error('Выберите канал общения');
+    const body = required(payload.text, 'сообщение').slice(0, 20000);
+    const type = payload.channel === 'call' ? 'call' : payload.channel === 'email' ? 'email' : payload.channel === 'note' ? 'note' : 'message';
+    state.activities.unshift({ id: id(), siteId: payload.siteId, taskId: '', type, channel: payload.channel, direction: ['note','call'].includes(payload.channel) ? 'internal' : 'outgoing', subject: String(payload.subject || '').slice(0, 500), externalKey: '', text: body, authorId: String(payload.authorId || 'manager-1'), createdAt: new Date().toISOString(), read: true, attachments: [] });
+  } else if (action === 'communication.read') {
+    if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Диалог не найден');
+    for (const item of state.activities) if (item.siteId === payload.siteId && (!payload.channel || item.channel === payload.channel)) item.read = true;
+  } else if (action === 'logistics.save') {
     const previous = state.logistics.find((item) => item.id === payload.id);
     if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Выберите объект доставки');
     if (payload.orderId && !state.orders.some((order) => order.id === payload.orderId && order.siteId === payload.siteId)) throw new Error('Заказ относится к другому объекту');

@@ -69,7 +69,14 @@ export function createDemoState() {
   const orders = sites.slice(0, 4).map((site, i) => ({ id: `order-${i + 1}`, number: `ДЕМО-0${i + 1}`, siteId: site.id, leadId: '', scope: `Демонстрационная комплектация: ${site.name}, комплект СИП-панелей`, reference: 'Учебная спецификация', approvedBy: 'manager-1', approvedAt: stamp, createdAt: stamp }));
   const titles = ['Раскрой панелей пола', 'Подготовка комплекта крепежа', 'Сборка стеновых панелей', 'Маркировка панелей', 'Контроль геометрии', 'Комплектация перекрытия'];
   const tasks = titles.map((title, i) => ({ id: `task-${i + 1}`, orderId: orders[[0, 1, 2, 0, 1, 3][i]].id, title, description: i === 5 ? 'Запросить недостающий брус у снабжения.' : 'Выполнить по согласованной спецификации заказа. Результат передать на проверку.', assigneeId: `worker-${Math.min(i + 1, 5)}`, status: ['planned', 'planned', 'doing', 'doing', 'review', 'blocked'][i], priority: i === 5 ? 'high' : 'normal', dueAt: dueAt(i < 2 ? -1 : 0, ['16:00', '16:00', '18:00', '17:00', '15:00', '16:00'][i]), quantity: i === 0 ? 38 : i === 2 ? 24 : 1, completedQty: i === 2 ? 12 : i === 4 ? 1 : 0, unit: i === 0 || i === 2 ? 'панелей' : 'комплект', blockReason: i === 5 ? 'Не хватает бруса' : '', checklist: [{ id: `check-${i}-1`, title: 'Проверить спецификацию', done: i >= 2 }, { id: `check-${i}-2`, title: 'Подготовить результат к приёмке', done: i === 4 }], createdAt: stamp, originalDueAt: '', rescheduleHistory: [] }));
-  const activities = [{ id: 'activity-1', siteId: 'site-3', taskId: '', type: 'email', text: 'КП отправлено. Ожидаем ответ по комплектации.', createdAt: dueAt(-1, '10:24'), authorId: 'manager-1' }, { id: 'activity-2', siteId: 'site-3', taskId: '', type: 'call', text: 'Уточнена комплектация. Обсудили изменения в планировке.', createdAt: dueAt(-3, '14:17'), authorId: 'manager-1' }, { id: 'activity-3', siteId: 'site-3', taskId: '', type: 'system', text: 'Новая заявка с сайта', createdAt: dueAt(-5, '09:03'), authorId: 'manager-1' }];
+  const activities = [
+    { id: 'activity-1', siteId: 'site-3', taskId: '', type: 'email', channel: 'email', direction: 'outgoing', subject: 'Коммерческое предложение', text: 'КП отправлено. Ожидаем ответ по комплектации.', createdAt: dueAt(-1, '10:24'), authorId: 'manager-1', read: true },
+    { id: 'activity-2', siteId: 'site-3', taskId: '', type: 'call', channel: 'call', direction: 'internal', subject: '', text: 'Уточнена комплектация. Обсудили изменения в планировке.', createdAt: dueAt(-3, '14:17'), authorId: 'manager-1', read: true },
+    { id: 'activity-3', siteId: 'site-3', taskId: '', type: 'system', channel: 'system', direction: 'internal', subject: '', text: 'Новая заявка с сайта', createdAt: dueAt(-5, '09:03'), authorId: 'manager-1', read: true },
+    { id: 'activity-4', siteId: 'site-1', taskId: '', type: 'message', channel: 'telegram', direction: 'incoming', subject: '', text: 'Добрый день! Можно перенести встречу на пятницу после 15:00?', createdAt: dueAt(0, '09:18'), authorId: '', read: false },
+    { id: 'activity-5', siteId: 'site-2', taskId: '', type: 'message', channel: 'whatsapp', direction: 'incoming', subject: '', text: 'Отправляю уточнение по расположению окон в гостиной.', createdAt: dueAt(-1, '18:42'), authorId: '', read: false },
+    { id: 'activity-6', siteId: 'site-4', taskId: '', type: 'message', channel: 'max', direction: 'outgoing', subject: '', text: 'Бригада запланирована на согласованную дату. Напомним за день до выезда.', createdAt: dueAt(-2, '12:05'), authorId: 'manager-2', read: true },
+  ];
   const employees = EMPLOYEES.map((person, index) => ({ ...person, avatar: EMPLOYEE_AVATARS[index], department: person.role === 'Цех' ? 'Производство' : 'Офис', phone: '', email: '', active: true, notes: '', attendanceMode: 'hours', payRate: 0, advanceAmount: 0 }));
   const crews = [
     { id: 'crew-1', name: 'Монтажная бригада №1', specialty: 'СИП-монтаж и силовой контур', leadId: 'worker-1', memberIds: ['worker-1', 'worker-2', 'worker-3'], phone: '', notes: '', active: true },
@@ -80,7 +87,7 @@ export function createDemoState() {
   return extendWorkspace({ schemaVersion: 1, revision: 0, clients, sites, leads, orders, tasks, activities, employees, crews, constructionStages, logistics });
 }
 
-function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1') { state.activities.unshift({ id: uid(), siteId, taskId, type, text: message, authorId, createdAt: new Date().toISOString() }); }
+function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1') { const channel = type === 'email' ? 'email' : type === 'call' ? 'call' : type === 'message' ? 'telegram' : type === 'system' ? 'system' : 'note'; state.activities.unshift({ id: uid(), siteId, taskId, type, channel, direction: ['system','note','call'].includes(channel) ? 'internal' : 'outgoing', subject: '', externalKey: '', text: message, authorId, createdAt: new Date().toISOString(), read: true, attachments: [] }); }
 export function applyCommand(current, action, payload = {}) {
   const state = extendWorkspace(structuredClone(current));
   if (applyOperation(state, action, payload)) { /* Operation committed below with shared validation. */ }
@@ -217,7 +224,7 @@ export function validateState(state) {
   if (state.employees === undefined) state.employees = createDemoState().employees;
   if (state.crews === undefined) state.crews = [];
   extendWorkspace(state);
-  const fields = { clients: ['id', 'name', 'phone', 'email'], sites: ['id', 'clientId', 'name', 'address', 'status', 'managerId', 'contractNumber', 'plannedStart', 'plannedFinish', 'actualStart', 'actualFinish', 'notes'], leads: ['id', 'siteId', 'status', 'ownerId', 'nextAction', 'dueAt', 'source', 'notes', 'createdAt'], orders: ['id', 'number', 'siteId', 'leadId', 'scope', 'reference', 'approvedBy', 'approvedAt', 'createdAt'], tasks: ['id', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'title', 'description', 'assigneeId', 'status', 'priority', 'dueAt', 'unit', 'blockReason', 'createdAt'], activities: ['id', 'siteId', 'taskId', 'type', 'text', 'createdAt', 'authorId'] };
+  const fields = { clients: ['id', 'name', 'phone', 'email'], sites: ['id', 'clientId', 'name', 'address', 'status', 'managerId', 'contractNumber', 'plannedStart', 'plannedFinish', 'actualStart', 'actualFinish', 'notes'], leads: ['id', 'siteId', 'status', 'ownerId', 'nextAction', 'dueAt', 'source', 'notes', 'createdAt'], orders: ['id', 'number', 'siteId', 'leadId', 'scope', 'reference', 'approvedBy', 'approvedAt', 'createdAt'], tasks: ['id', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'title', 'description', 'assigneeId', 'status', 'priority', 'dueAt', 'unit', 'blockReason', 'createdAt'], activities: ['id', 'siteId', 'taskId', 'type', 'channel', 'direction', 'subject', 'externalKey', 'text', 'createdAt', 'authorId'] };
   for (const [table, columns] of Object.entries(fields)) {
     if (!Array.isArray(state[table]) || state[table].length > 20000) throw new Error(`Неверный раздел данных: ${table}`);
     const ids = new Set();
@@ -237,7 +244,7 @@ export function validateState(state) {
     if (task.originalDueAt) validDue(task.originalDueAt);
     for (const entry of task.rescheduleHistory) { if (entry.from) validDue(entry.from); validDue(entry.to); }
   }
-  if (state.activities.some((a) => (!has('sites', a.siteId) && !(a.taskId && state.tasks.some((t) => t.id === a.taskId && !t.orderId))) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
+  if (state.activities.some((a) => (!has('sites', a.siteId) && !(a.taskId && state.tasks.some((t) => t.id === a.taskId && !t.orderId))) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || !['note','call','email','telegram','whatsapp','max','system'].includes(a.channel) || !['internal','incoming','outgoing'].includes(a.direction) || typeof a.read !== 'boolean' || !Array.isArray(a.attachments) || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
   validateOperations(state);
   return state;
 }

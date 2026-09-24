@@ -77,3 +77,11 @@ test('логистика хранит рейс и проверяет связь 
   assert.equal(state.logistics[0].status,'in_transit');assert.equal(state.logistics[0].siteId,'site-1');
   assert.throws(()=>applyCommand(state,'logistics.save',{siteId:'site-2',orderId:'order-1',plannedAt:'2026-10-15T09:00',vehicle:'ГАЗель',status:'planned'}),/другому объекту/);
 });
+test('центр общения хранит канал, направление и отметку прочтения',()=>{
+  let state=createDemoState();
+  state=applyCommand(state,'communication.send',{siteId:'site-1',channel:'telegram',text:'Подтверждаем встречу',authorId:'manager-1'});
+  assert.equal(state.activities[0].channel,'telegram');assert.equal(state.activities[0].direction,'outgoing');assert.equal(state.activities[0].read,true);
+  const incoming=state.activities.find((item)=>item.siteId==='site-1'&&item.direction==='incoming');assert.equal(incoming.read,false);
+  state=applyCommand(state,'communication.read',{siteId:'site-1',channel:'telegram'});assert.equal(state.activities.filter((item)=>item.siteId==='site-1'&&item.channel==='telegram').every((item)=>item.read),true);validateState(state);
+  assert.throws(()=>applyCommand(state,'communication.send',{siteId:'missing',channel:'telegram',text:'Тест'}),/объект/);
+});

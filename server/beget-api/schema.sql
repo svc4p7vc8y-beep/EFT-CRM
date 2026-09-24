@@ -367,6 +367,8 @@ CREATE TABLE IF NOT EXISTS crm_communications (
   external_key VARCHAR(255) NOT NULL DEFAULT '',
   subject VARCHAR(500) NOT NULL DEFAULT '',
   body MEDIUMTEXT NOT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 1,
+  attachments_json JSON NULL,
   occurred_at DATETIME NOT NULL,
   author_id BIGINT UNSIGNED NULL,
   author_employee_id CHAR(36) NULL,
