@@ -15,6 +15,7 @@ import { Attendance } from '../features/Attendance.jsx';
 import { ClientWorkspace } from '../features/ClientWorkspace.jsx';
 import { MyTasks } from '../features/MyTasks.jsx';
 import { Construction } from '../features/Construction.jsx';
+import { Logistics } from '../features/Logistics.jsx';
 import { RELEASE } from './operations.js';
 import { employeeFromApi } from './api.js';
 import './app.css';
@@ -23,12 +24,12 @@ import './operations.css';
 const navigation = [
   { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'construction', label: 'Строительство', icon: House }, { id: 'communications', label: 'Общение', icon: MessageSquare },
   { id: 'production', label: 'Производство', icon: Factory, separator: true }, { id: 'tasks', label: 'Мои задачи', icon: CheckSquare }, { id: 'calendar', label: 'Календарь', icon: CalendarDays }, { id: 'attendance', label: 'Табель', icon: ClipboardList },
-  { id: 'supplies', label: 'Закупки и склад', icon: Package, separator: true }, { id: 'crews', label: 'Бригады', icon: HardHat }, { id: 'logistics', label: 'Логистика', icon: Truck, planned: true }, { id: 'settings', label: 'Настройки', icon: Settings2, separator: true },
+  { id: 'supplies', label: 'Закупки и склад', icon: Package, separator: true }, { id: 'crews', label: 'Бригады', icon: HardHat }, { id: 'logistics', label: 'Логистика', icon: Truck }, { id: 'settings', label: 'Настройки', icon: Settings2, separator: true },
 ];
 const getRoute = () => { const hash = window.location.hash.slice(1); const client = hash.match(/^client\/(.+)$/); if (client) return { page: 'client', leadId: decodeURIComponent(client[1]), siteId: '' }; const construction = hash.match(/^construction\/(.+)$/); if (construction) return { page: 'construction', leadId: '', siteId: decodeURIComponent(construction[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '', siteId: '' }; };
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
-const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment']);
+const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment','logistics.save']);
 const inventoryServerActions = new Set(['material.save','supplier.save','need.save','purchase.create','stock.post','tool.save','tool.transfer']);
 
 export function App({ runtime = { mode: 'demo' } }) {
@@ -48,7 +49,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const serverInventory = inventoryOverride || runtime.serverData || {};
   const localInventory = useMemo(() => localState.materials?.length ? localState : createDemoState(), [localState]);
   const inventorySource = serverInventory.inventoryInitialized === false ? localInventory : serverInventory;
-  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], constructionStages: serverCore.constructionStages || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
+  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], constructionStages: serverCore.constructionStages || [], logistics: serverCore.logistics || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
   const personnelState = state;
   const initialRoute = getRoute();
   const themeKey = `eft-crm-theme:${sessionUser?.username || 'local'}`;
@@ -89,7 +90,7 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
     const next = applyCommand(state, action, payload); replace(next); setToast({ text: message, error: false });
     if (coreServerActions.has(action) && runtime.saveWorkspace) {
-      const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities, constructionStages: next.constructionStages };
+      const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities, constructionStages: next.constructionStages, logistics: next.logistics };
       setServerOverride(snapshot);
       saveQueue.current = saveQueue.current.then(() => runtime.saveWorkspace(snapshot, revisionRef.current, false)).then((saved) => {
         revisionRef.current = saved.workspaceRevision; setServerOverride(saved);
@@ -152,6 +153,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
+      {page === 'logistics' ? <Logistics state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} command={mutate} runtime={runtime} /> : null}

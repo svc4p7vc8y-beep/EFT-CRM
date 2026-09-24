@@ -71,3 +71,9 @@ test('потребность снабжения хранит несколько 
   s=applyCommand(s,'need.save',{...s.supplyNeeds[0],status:'rejected'});assert.equal(s.supplyNeeds[0].status,'rejected');validateState(s);
   assert.throws(()=>applyCommand(s,'need.save',{...need,id:'',links:['javascript:alert(1)']}),/http/);
 });
+test('логистика хранит рейс и проверяет связь заказа с объектом',()=>{
+  const source=createDemoState();
+  const state=applyCommand(source,'logistics.save',{siteId:'site-1',orderId:'order-1',plannedAt:'2026-10-15T09:00',deliveryWindow:'09:00–12:00',vehicle:'ГАЗель А123ВС',driverId:'worker-1',status:'in_transit',carrier:'ЭФТ',loadingAddress:'Производство',unloadingAddress:'Истра',note:'Домокомплект'});
+  assert.equal(state.logistics[0].status,'in_transit');assert.equal(state.logistics[0].siteId,'site-1');
+  assert.throws(()=>applyCommand(state,'logistics.save',{siteId:'site-2',orderId:'order-1',plannedAt:'2026-10-15T09:00',vehicle:'ГАЗель',status:'planned'}),/другому объекту/);
+});

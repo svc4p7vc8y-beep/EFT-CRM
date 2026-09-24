@@ -286,13 +286,19 @@ function crm_public_workspace(): array {
             'rescheduleHistory' => is_array($history) ? $history : [],
         ];
     }, $db->query('SELECT * FROM crm_tasks ORDER BY created_at DESC')->fetchAll());
+    $logistics = array_map(static fn(array $row): array => [
+        'id' => $row['id'], 'number' => $row['public_number'], 'siteId' => $row['site_id'], 'orderId' => $row['order_id'] ?: '',
+        'plannedAt' => crm_db_datetime($row['planned_at']), 'deliveryWindow' => $row['delivery_window'], 'vehicle' => $row['vehicle'],
+        'driverId' => $row['driver_id'] ?: '', 'status' => $row['status'], 'carrier' => $row['carrier'], 'loadingAddress' => $row['loading_address'],
+        'unloadingAddress' => $row['unloading_address'], 'note' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true), 'updatedAt' => crm_db_datetime($row['updated_at'], true),
+    ], $db->query('SELECT * FROM crm_logistics ORDER BY planned_at, created_at')->fetchAll());
     $activities = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'siteId' => $row['site_id'] ?: '', 'taskId' => $row['task_id'] ?: '', 'type' => $row['activity_type'],
         'text' => $row['body'], 'authorId' => $row['author_employee_id'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
     ], $db->query('SELECT id, site_id, task_id, activity_type, body, author_employee_id, occurred_at FROM crm_communications ORDER BY occurred_at DESC')->fetchAll());
     $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
     return [
-        'clients' => $clients, 'sites' => $sites, 'leads' => $leads, 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages,
+        'clients' => $clients, 'sites' => $sites, 'leads' => $leads, 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages, 'logistics' => $logistics,
         'workspaceRevision' => (int)($settings['workspace_revision'] ?? 0), 'workspaceInitialized' => ($settings['workspace_initialized'] ?? '0') === '1',
     ];
 }
@@ -439,7 +445,8 @@ function crm_workspace_for_user(array $user): array {
     $clients = array_values(array_map(static fn(array $client): array => array_merge($client, ['phone' => '', 'email' => '']), array_filter($workspace['clients'], static fn(array $client): bool => isset($clientIds[$client['id']]))));
     $activities = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])));
     $constructionStages = array_values(array_filter($workspace['constructionStages'], static fn(array $stage): bool => isset($siteIds[$stage['siteId']])));
-    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages]);
+    $logistics = array_values(array_filter($workspace['logistics'], static fn(array $route): bool => isset($siteIds[$route['siteId']])));
+    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages, 'logistics' => $logistics]);
 }
 
 function crm_sql_datetime(mixed $value): ?string {
@@ -466,6 +473,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
     $tasks = crm_workspace_rows($workspace['tasks'] ?? null, 'задачи', 50000);
     $activities = crm_workspace_rows($workspace['activities'] ?? null, 'история', 100000);
     $constructionStages = crm_workspace_rows($workspace['constructionStages'] ?? [], 'этапы строительства', 50000);
+    $logistics = crm_workspace_rows($workspace['logistics'] ?? [], 'логистика', 50000);
     $db->beginTransaction();
     try {
         $lock = $db->prepare("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized') FOR UPDATE");
@@ -492,6 +500,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $employeeIds = array_fill_keys($db->query('SELECT id FROM crm_employees')->fetchAll(PDO::FETCH_COLUMN), true);
         $db->exec('DELETE FROM crm_communications');
         $db->exec('DELETE FROM crm_tasks');
+        $db->exec('DELETE FROM crm_logistics');
         $db->exec('DELETE FROM crm_orders');
         $db->exec('DELETE FROM crm_leads');
         $db->exec('DELETE FROM crm_construction_stages');
@@ -533,6 +542,14 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $insertOrder->execute([crm_required_text($row['id'] ?? '', 'идентификатор заказа', 36), crm_required_text($row['number'] ?? '', 'номер заказа', 32), crm_required_text($row['siteId'] ?? '', 'объект заказа', 36), crm_text($row['leadId'] ?? '', 36) ?: null, crm_required_text($row['scope'] ?? '', 'комплектация заказа', 10000), crm_text($row['reference'] ?? '', 1000), $approvedBy ?: null, crm_sql_datetime($row['approvedAt'] ?? ''), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
         $orderSites = $db->query('SELECT id, site_id FROM crm_orders')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $insertRoute = $db->prepare('INSERT INTO crm_logistics (id, public_number, site_id, order_id, planned_at, delivery_window, vehicle, driver_id, status, carrier, loading_address, unloading_address, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        foreach ($logistics as $row) {
+            $siteId = crm_required_text($row['siteId'] ?? '', 'объект рейса', 36); if (!isset($siteIds[$siteId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект рейса не найден.'], 422);
+            $orderId = crm_text($row['orderId'] ?? '', 36); if ($orderId !== '' && (!isset($orderSites[$orderId]) || $orderSites[$orderId] !== $siteId)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Заказ рейса относится к другому объекту.'], 422);
+            $driverId = crm_text($row['driverId'] ?? '', 36); if (!isset($employeeIds[$driverId])) $driverId = '';
+            $status = in_array($row['status'] ?? '', ['planned','loading','in_transit','delivered','problem','cancelled'], true) ? $row['status'] : 'planned';
+            $insertRoute->execute([crm_required_text($row['id'] ?? '', 'идентификатор рейса', 36), crm_required_text($row['number'] ?? '', 'номер рейса', 32), $siteId, $orderId ?: null, crm_sql_datetime($row['plannedAt'] ?? ''), crm_text($row['deliveryWindow'] ?? '', 120), crm_required_text($row['vehicle'] ?? '', 'машина', 200), $driverId ?: null, $status, crm_text($row['carrier'] ?? '', 200), crm_text($row['loadingAddress'] ?? '', 500), crm_text($row['unloadingAddress'] ?? '', 500), crm_text($row['note'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), crm_sql_datetime($row['updatedAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+        }
         $stageSites = $db->query('SELECT id, site_id FROM crm_construction_stages')->fetchAll(PDO::FETCH_KEY_PAIR);
         $insertTask = $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($tasks as $row) {

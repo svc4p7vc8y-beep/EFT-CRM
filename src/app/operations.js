@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 33;
+export const RELEASE = 34;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -23,7 +23,7 @@ export function extendWorkspace(state) {
     'Согласовать смету', 'Согласовать договор', 'Получить предоплату', 'Запланировать выезд на объект',
     'Передать проектировщику', 'Передать в производство', 'Согласовать дату монтажа', 'Проверить завершение этапа',
   ].map((title, index) => ({ id: `client-action-${index + 1}`, title, active: true }));
-  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds', 'constructionStages']) state[key] ??= [];
+  for (const key of ['stockDocuments', 'purchases', 'suppliers', 'tools', 'toolEvents', 'attendance', 'attachments', 'supplyNeeds', 'constructionStages', 'logistics']) state[key] ??= [];
   state.sites?.forEach((site) => {
     site.status ??= 'planning'; site.managerId ??= ''; site.contractNumber ??= ''; site.plannedStart ??= ''; site.plannedFinish ??= '';
     site.actualStart ??= ''; site.actualFinish ??= ''; site.notes ??= '';
@@ -49,7 +49,16 @@ function linesFrom(state, lines) {
   return lines.map((line) => { const item = state.materials.find((m) => m.id === line.itemId); if (!item || seen.has(item.id)) throw new Error('Позиция не найдена или повторяется'); seen.add(item.id); return { itemId: item.id, name: item.name, unit: item.unit, quantity: num(line.quantity, 0.01, 1e6), price: round(num(line.price)) }; });
 }
 export function applyOperation(state, action, payload) {
-  if (action === 'material.save') {
+  if (action === 'logistics.save') {
+    const previous = state.logistics.find((item) => item.id === payload.id);
+    if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Выберите объект доставки');
+    if (payload.orderId && !state.orders.some((order) => order.id === payload.orderId && order.siteId === payload.siteId)) throw new Error('Заказ относится к другому объекту');
+    if (payload.driverId && !state.employees.some((person) => person.id === payload.driverId)) throw new Error('Водитель не найден');
+    if (!['planned','loading','in_transit','delivered','problem','cancelled'].includes(payload.status)) throw new Error('Выберите статус рейса');
+    const plannedAt = String(payload.plannedAt || ''); if (!plannedAt || Number.isNaN(Date.parse(plannedAt))) throw new Error('Укажите дату и время рейса');
+    const item = { id: previous?.id || id(), number: previous?.number || `Р-${String(state.logistics.length + 1).padStart(4, '0')}`, siteId: payload.siteId, orderId: String(payload.orderId || ''), plannedAt, deliveryWindow: String(payload.deliveryWindow || '').slice(0, 120), vehicle: required(payload.vehicle, 'машина').slice(0, 200), driverId: String(payload.driverId || ''), status: payload.status, carrier: String(payload.carrier || '').slice(0, 200), loadingAddress: String(payload.loadingAddress || '').slice(0, 500), unloadingAddress: String(payload.unloadingAddress || '').slice(0, 500), note: String(payload.note || '').slice(0, 2000), createdAt: previous?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
+    if (previous) Object.assign(previous, item); else state.logistics.unshift(item);
+  } else if (action === 'material.save') {
     const previous = state.materials.find((m) => m.id === payload.id);
     if (previous && state.stockDocuments.some((d) => d.lines.some((l) => l.itemId === previous.id)) && previous.unit !== payload.unit) throw new Error('Единицу материала с движениями менять нельзя');
     if (previous?.tracked && !payload.tracked && stockFor(state, previous.id).quantity !== 0) throw new Error('Сначала обнулите складской остаток движениями');
@@ -144,12 +153,13 @@ export function applyOperation(state, action, payload) {
   return true;
 }
 export function validateOperations(state) {
-  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates', 'clientActions', 'attachments', 'supplyNeeds']) {
+  for (const table of ['materials', 'suppliers', 'stockDocuments', 'purchases', 'tools', 'toolEvents', 'attendance', 'taskTemplates', 'clientActions', 'attachments', 'supplyNeeds', 'logistics']) {
     const rows = state[table];
     if (!Array.isArray(rows) || rows.length > 20000 || rows.some((r) => !r || typeof r.id !== 'string' || !r.id) || new Set(rows.map((r) => r.id)).size !== rows.length) throw new Error(`Некорректный раздел: ${table}`);
   }
   const has = (table, key) => state[table].some((r) => r.id === key);
   const str = (v) => typeof v === 'string' && v.length <= 10000;
+  for (const item of state.logistics) if (![item.number,item.siteId,item.orderId,item.plannedAt,item.deliveryWindow,item.vehicle,item.driverId,item.status,item.carrier,item.loadingAddress,item.unloadingAddress,item.note,item.createdAt,item.updatedAt].every(str) || !has('sites', item.siteId) || (item.orderId && !state.orders.some((order) => order.id === item.orderId && order.siteId === item.siteId)) || (item.driverId && !has('employees', item.driverId)) || !['planned','loading','in_transit','delivered','problem','cancelled'].includes(item.status) || Number.isNaN(Date.parse(item.plannedAt)) || Number.isNaN(Date.parse(item.createdAt)) || Number.isNaN(Date.parse(item.updatedAt))) throw new Error('Некорректный рейс');
   for (const item of state.materials) { if (![item.name, item.unit, item.category, item.source, item.priceNote].every(str) || typeof item.tracked !== 'boolean') throw new Error('Некорректная номенклатура'); num(item.price); num(item.minStock); }
   for (const supplier of state.suppliers) if (![supplier.name, supplier.contact, supplier.notes].every(str)) throw new Error('Некорректный поставщик');
   for (const doc of [...state.stockDocuments, ...state.purchases]) {

@@ -200,6 +200,31 @@ CREATE TABLE IF NOT EXISTS crm_tasks (
   CONSTRAINT fk_crm_tasks_created_by FOREIGN KEY (created_by) REFERENCES crm_users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_logistics (
+  id CHAR(36) NOT NULL,
+  public_number VARCHAR(32) NOT NULL,
+  site_id CHAR(36) NOT NULL,
+  order_id CHAR(36) NULL,
+  planned_at DATETIME NOT NULL,
+  delivery_window VARCHAR(120) NOT NULL DEFAULT '',
+  vehicle VARCHAR(200) NOT NULL,
+  driver_id CHAR(36) NULL,
+  status ENUM('planned','loading','in_transit','delivered','problem','cancelled') NOT NULL DEFAULT 'planned',
+  carrier VARCHAR(200) NOT NULL DEFAULT '',
+  loading_address VARCHAR(500) NOT NULL DEFAULT '',
+  unloading_address VARCHAR(500) NOT NULL DEFAULT '',
+  notes TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_logistics_number (public_number),
+  KEY idx_crm_logistics_schedule (planned_at, status),
+  KEY idx_crm_logistics_site (site_id, planned_at),
+  CONSTRAINT fk_crm_logistics_site FOREIGN KEY (site_id) REFERENCES crm_sites(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_logistics_order FOREIGN KEY (order_id) REFERENCES crm_orders(id) ON DELETE SET NULL,
+  CONSTRAINT fk_crm_logistics_driver FOREIGN KEY (driver_id) REFERENCES crm_employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crm_attendance (
   id CHAR(36) NOT NULL,
   employee_id CHAR(36) NOT NULL,
