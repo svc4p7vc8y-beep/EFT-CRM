@@ -67,7 +67,7 @@ if ($action === 'logout' && $method === 'POST') {
 
 if ($action === 'bootstrap' && $method === 'GET') {
     $user = crm_user();
-    crm_schema_ensure_v29();
+    crm_schema_ensure_v30();
     $canSeeAll = crm_can($user, 'employees.view') || crm_can($user, 'employees.manage') || crm_can($user, 'attendance.manage') || crm_can($user, 'finance.view');
     if ($canSeeAll) {
         $rows = crm_db()->query('SELECT * FROM crm_employees ORDER BY active DESC, full_name')->fetchAll();
@@ -82,6 +82,10 @@ if ($action === 'bootstrap' && $method === 'GET') {
     $includeCrews = crm_can($user, 'crews.view') || crm_can($user, 'crews.manage');
     $includeUsers = crm_can($user, 'users.manage');
     $workspace = crm_workspace_for_user($user);
+    $inventory = crm_can($user, 'procurement.view') || crm_can($user, 'procurement.manage') ? crm_public_inventory() : [
+        'materials' => [], 'suppliers' => [], 'supplyNeeds' => [], 'purchases' => [], 'stockDocuments' => [], 'tools' => [], 'toolEvents' => [],
+        'inventoryRevision' => 0, 'inventoryInitialized' => true,
+    ];
     crm_json(array_merge([
         'ok' => true,
         'user' => $user,
@@ -90,7 +94,7 @@ if ($action === 'bootstrap' && $method === 'GET') {
         'employees' => array_map(static fn(array $row): array => crm_public_employee($row, $includeFinance), $rows),
         'crews' => $includeCrews ? crm_public_crews() : [],
         'users' => $includeUsers ? array_map('crm_public_user', crm_db()->query('SELECT id, username, display_name, role, employee_id, active, last_login_at FROM crm_users ORDER BY active DESC, display_name')->fetchAll()) : [],
-    ], $workspace));
+    ], $workspace, $inventory));
 }
 
 if ($action === 'workspace.save' && $method === 'PUT') {
@@ -103,6 +107,17 @@ if ($action === 'workspace.save' && $method === 'PUT') {
     if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию данных. Обновите страницу.'], 422);
     $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']));
     crm_json(array_merge(['ok' => true], $workspace));
+}
+
+if ($action === 'inventory.save' && $method === 'PUT') {
+    crm_require_origin();
+    $user = crm_require_capability('procurement.manage');
+    crm_csrf();
+    $input = crm_input(8 * 1024 * 1024);
+    $baseRevision = filter_var($input['baseRevision'] ?? null, FILTER_VALIDATE_INT);
+    if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию склада. Обновите страницу.'], 422);
+    $inventory = crm_inventory_save(is_array($input['inventory'] ?? null) ? $input['inventory'] : [], $user, $baseRevision);
+    crm_json(array_merge(['ok' => true], $inventory));
 }
 
 if ($action === 'finance.unlock' && $method === 'POST') {

@@ -180,6 +180,121 @@ CREATE TABLE IF NOT EXISTS crm_attendance (
   CONSTRAINT fk_crm_attendance_updated_by FOREIGN KEY (updated_by) REFERENCES crm_users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_materials (
+  id VARCHAR(120) NOT NULL,
+  name VARCHAR(300) NOT NULL,
+  category VARCHAR(160) NOT NULL,
+  unit_name VARCHAR(50) NOT NULL,
+  price_cents BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  tracked TINYINT(1) NOT NULL DEFAULT 0,
+  min_stock DECIMAL(14,3) NOT NULL DEFAULT 0,
+  source_name VARCHAR(255) NOT NULL DEFAULT '',
+  price_note VARCHAR(500) NOT NULL DEFAULT '',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_materials_category (category, name),
+  KEY idx_crm_materials_tracked (tracked, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_suppliers (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(240) NOT NULL,
+  contact_text VARCHAR(500) NOT NULL DEFAULT '',
+  notes TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_suppliers_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_supply_needs (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(300) NOT NULL,
+  need_kind ENUM('tool','consumable','equipment','other') NOT NULL,
+  destination ENUM('production','tp') NOT NULL,
+  quantity DECIMAL(14,3) NOT NULL,
+  unit_name VARCHAR(50) NOT NULL,
+  priority ENUM('normal','high','urgent') NOT NULL DEFAULT 'normal',
+  need_status ENUM('requested','approved','ordered','received','rejected','cancelled') NOT NULL DEFAULT 'requested',
+  needed_by DATE NULL,
+  requested_by VARCHAR(200) NOT NULL DEFAULT '',
+  links_json JSON NULL,
+  note TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_supply_needs_status (need_status, priority, needed_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_purchases (
+  id CHAR(36) NOT NULL,
+  public_number VARCHAR(40) NOT NULL,
+  purchase_date DATE NOT NULL,
+  due_date DATE NULL,
+  supplier_id CHAR(36) NOT NULL,
+  lines_json JSON NOT NULL,
+  note TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_purchases_number (public_number),
+  KEY idx_crm_purchases_supplier (supplier_id, purchase_date),
+  CONSTRAINT fk_crm_purchases_supplier FOREIGN KEY (supplier_id) REFERENCES crm_suppliers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_stock_documents (
+  id CHAR(36) NOT NULL,
+  public_number VARCHAR(40) NOT NULL,
+  document_date DATE NOT NULL,
+  document_kind ENUM('receipt','issue','return','writeoff','direct') NOT NULL,
+  target_name VARCHAR(500) NOT NULL,
+  supplier_id CHAR(36) NULL,
+  purchase_id CHAR(36) NULL,
+  order_id CHAR(36) NULL,
+  reference_text VARCHAR(500) NOT NULL DEFAULT '',
+  note TEXT NOT NULL,
+  lines_json JSON NOT NULL,
+  total_cents BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_stock_documents_number (public_number),
+  KEY idx_crm_stock_documents_date (document_date, document_kind),
+  CONSTRAINT fk_crm_stock_documents_supplier FOREIGN KEY (supplier_id) REFERENCES crm_suppliers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_crm_stock_documents_purchase FOREIGN KEY (purchase_id) REFERENCES crm_purchases(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_tools (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(300) NOT NULL,
+  inventory_number VARCHAR(120) NOT NULL,
+  home_kind ENUM('production','field') NOT NULL DEFAULT 'production',
+  price_cents BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  note TEXT NOT NULL,
+  holder_type ENUM('','employee','crew') NOT NULL DEFAULT '',
+  holder_id CHAR(36) NULL,
+  due_date DATE NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_tools_inventory_number (inventory_number),
+  KEY idx_crm_tools_holder (holder_type, holder_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_tool_events (
+  id CHAR(36) NOT NULL,
+  tool_id CHAR(36) NOT NULL,
+  tool_name VARCHAR(300) NOT NULL,
+  inventory_number VARCHAR(120) NOT NULL,
+  event_kind ENUM('issue','return') NOT NULL,
+  holder_name VARCHAR(240) NOT NULL,
+  event_date DATE NOT NULL,
+  due_date DATE NULL,
+  note TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_tool_events_tool (tool_id, event_date),
+  CONSTRAINT fk_crm_tool_events_tool FOREIGN KEY (tool_id) REFERENCES crm_tools(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crm_communications (
   id CHAR(36) NOT NULL,
   site_id CHAR(36) NULL,

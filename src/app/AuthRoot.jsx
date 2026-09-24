@@ -107,6 +107,11 @@ export function AuthRoot() {
       updateWorkspace(result);
       return initialize ? refreshWorkspace() : result;
     },
+    saveInventory: async (inventory, baseRevision) => {
+      const result = await crmApi.saveInventory(inventory, baseRevision);
+      updateWorkspace(result);
+      return result;
+    },
     refreshWorkspace,
     saveEmployee: async (employee) => {
       const result = await crmApi.saveEmployee(employeeToApi(employee));

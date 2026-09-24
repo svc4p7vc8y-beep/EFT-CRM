@@ -150,12 +150,12 @@ function crm_user(): array {
 function crm_capabilities(string $role): array {
     $matrix = [
         'owner' => ['*'],
-        'admin' => ['employees.manage','crews.manage','clients.manage','tasks.manage','attendance.manage','integrations.manage','audit.view'],
-        'finance' => ['employees.view','attendance.view','finance.view','finance.manage'],
-        'manager' => ['employees.view','clients.manage','tasks.manage','attendance.self'],
-        'production' => ['employees.view','crews.view','tasks.manage','attendance.manage'],
+        'admin' => ['employees.manage','crews.manage','clients.manage','tasks.manage','attendance.manage','procurement.manage','integrations.manage','audit.view'],
+        'finance' => ['employees.view','attendance.view','finance.view','finance.manage','procurement.view'],
+        'manager' => ['employees.view','clients.manage','tasks.manage','attendance.self','procurement.view'],
+        'production' => ['employees.view','crews.view','tasks.manage','attendance.manage','procurement.view'],
         'procurement' => ['employees.view','clients.view','tasks.view','procurement.manage'],
-        'foreman' => ['employees.view','crews.view','tasks.crew','attendance.self'],
+        'foreman' => ['employees.view','crews.view','tasks.crew','attendance.self','procurement.view'],
         'employee' => ['tasks.self','attendance.self'],
         'viewer' => ['clients.view','tasks.view'],
     ];
@@ -178,11 +178,17 @@ function crm_column_exists(string $table, string $column): bool {
     return (int)$statement->fetchColumn() > 0;
 }
 
-function crm_schema_ensure_v29(): void {
+function crm_schema_ensure_v30(): void {
     static $ready = false;
     if ($ready) return;
     crm_settings_ensure();
     $db = crm_db();
+    $schema = file_get_contents(__DIR__ . '/schema.sql');
+    if ($schema === false) throw new RuntimeException('CRM schema file is unavailable.');
+    foreach (preg_split('/;\s*(?:\r?\n|$)/', $schema) ?: [] as $statement) {
+        $statement = trim($statement);
+        if ($statement !== '') $db->exec($statement);
+    }
     $db->exec("CREATE TABLE IF NOT EXISTS crm_orders (
       id CHAR(36) NOT NULL, public_number VARCHAR(32) NOT NULL, site_id CHAR(36) NOT NULL, lead_id CHAR(36) NULL,
       scope TEXT NOT NULL, reference_text VARCHAR(1000) NOT NULL DEFAULT '', approved_by_employee_id CHAR(36) NULL,
@@ -215,7 +221,7 @@ function crm_schema_ensure_v29(): void {
     foreach ($columns as $table => $definitions) foreach ($definitions as $column => $definition) {
         if (!crm_column_exists($table, $column)) $db->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
     }
-    foreach (['workspace_revision' => '0', 'workspace_initialized' => '0'] as $key => $value) {
+    foreach (['workspace_revision' => '0', 'workspace_initialized' => '0', 'inventory_revision' => '0', 'inventory_initialized' => '0'] as $key => $value) {
         $statement = $db->prepare('INSERT IGNORE INTO crm_settings (setting_key, setting_value) VALUES (?, ?)');
         $statement->execute([$key, $value]);
     }
@@ -228,7 +234,7 @@ function crm_db_datetime(?string $value, bool $withSeconds = false): string {
 }
 
 function crm_public_workspace(): array {
-    crm_schema_ensure_v29();
+    crm_schema_ensure_v30();
     $db = crm_db();
     $clients = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'name' => $row['display_name'], 'phone' => $row['phone'], 'email' => $row['email'],
@@ -269,6 +275,131 @@ function crm_public_workspace(): array {
     ];
 }
 
+function crm_inventory_lines(mixed $value, array $materialIds): array {
+    if (!is_array($value) || !$value || count($value) > 500) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Добавьте позиции документа.'], 422);
+    $lines = [];
+    $seen = [];
+    foreach ($value as $row) {
+        if (!is_array($row)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте позиции документа.'], 422);
+        $itemId = crm_required_text($row['itemId'] ?? '', 'материал', 120);
+        if (!isset($materialIds[$itemId]) || isset($seen[$itemId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Материал документа не найден или повторяется.'], 422);
+        $quantity = (float)($row['quantity'] ?? 0); $price = (float)($row['price'] ?? -1);
+        if ($quantity <= 0 || $quantity > 1000000 || $price < 0 || $price > 1000000000) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте количество и цену.'], 422);
+        $seen[$itemId] = true;
+        $lines[] = ['itemId' => $itemId, 'name' => crm_required_text($row['name'] ?? '', 'название материала', 300), 'unit' => crm_required_text($row['unit'] ?? '', 'единица', 50), 'quantity' => $quantity, 'price' => round($price, 2)];
+    }
+    return $lines;
+}
+
+function crm_public_inventory(): array {
+    crm_schema_ensure_v30();
+    $db = crm_db();
+    $decode = static function (mixed $value): array { $rows = json_decode((string)$value, true); return is_array($rows) ? $rows : []; };
+    $materials = array_map(static fn(array $row): array => [
+        'id' => $row['id'], 'name' => $row['name'], 'category' => $row['category'], 'unit' => $row['unit_name'],
+        'price' => ((int)$row['price_cents']) / 100, 'tracked' => (bool)$row['tracked'], 'minStock' => (float)$row['min_stock'],
+        'source' => $row['source_name'], 'priceNote' => $row['price_note'],
+    ], $db->query('SELECT * FROM crm_materials ORDER BY category, name')->fetchAll());
+    $suppliers = array_map(static fn(array $row): array => ['id' => $row['id'], 'name' => $row['name'], 'contact' => $row['contact_text'], 'notes' => $row['notes']], $db->query('SELECT * FROM crm_suppliers ORDER BY name')->fetchAll());
+    $needs = array_map(static function (array $row) use ($decode): array { return [
+        'id' => $row['id'], 'name' => $row['name'], 'kind' => $row['need_kind'], 'destination' => $row['destination'],
+        'quantity' => (float)$row['quantity'], 'unit' => $row['unit_name'], 'priority' => $row['priority'], 'status' => $row['need_status'],
+        'neededBy' => $row['needed_by'] ?: '', 'requestedBy' => $row['requested_by'], 'links' => $decode($row['links_json']), 'note' => $row['note'],
+        'createdAt' => crm_db_datetime($row['created_at'], true), 'updatedAt' => crm_db_datetime($row['updated_at'], true),
+    ]; }, $db->query('SELECT * FROM crm_supply_needs ORDER BY created_at DESC')->fetchAll());
+    $purchases = array_map(static function (array $row) use ($decode): array { return [
+        'id' => $row['id'], 'number' => $row['public_number'], 'date' => $row['purchase_date'], 'dueDate' => $row['due_date'] ?: '',
+        'supplierId' => $row['supplier_id'], 'lines' => $decode($row['lines_json']), 'note' => $row['note'], 'createdAt' => crm_db_datetime($row['created_at'], true),
+    ]; }, $db->query('SELECT * FROM crm_purchases ORDER BY created_at')->fetchAll());
+    $documents = array_map(static function (array $row) use ($decode): array { return [
+        'id' => $row['id'], 'number' => $row['public_number'], 'date' => $row['document_date'], 'kind' => $row['document_kind'],
+        'target' => $row['target_name'], 'supplierId' => $row['supplier_id'] ?: '', 'purchaseId' => $row['purchase_id'] ?: '', 'orderId' => $row['order_id'] ?: '',
+        'reference' => $row['reference_text'], 'note' => $row['note'], 'lines' => $decode($row['lines_json']), 'total' => ((int)$row['total_cents']) / 100,
+        'createdAt' => crm_db_datetime($row['created_at'], true),
+    ]; }, $db->query('SELECT * FROM crm_stock_documents ORDER BY created_at')->fetchAll());
+    $tools = array_map(static fn(array $row): array => [
+        'id' => $row['id'], 'name' => $row['name'], 'serial' => $row['inventory_number'], 'home' => $row['home_kind'],
+        'price' => ((int)$row['price_cents']) / 100, 'note' => $row['note'], 'holderType' => $row['holder_type'],
+        'holderId' => $row['holder_id'] ?: '', 'dueDate' => $row['due_date'] ?: '',
+    ], $db->query('SELECT * FROM crm_tools ORDER BY name')->fetchAll());
+    $events = array_map(static fn(array $row): array => [
+        'id' => $row['id'], 'toolId' => $row['tool_id'], 'toolName' => $row['tool_name'], 'serial' => $row['inventory_number'],
+        'kind' => $row['event_kind'], 'holder' => $row['holder_name'], 'date' => $row['event_date'], 'dueDate' => $row['due_date'] ?: '', 'note' => $row['note'],
+    ], $db->query('SELECT * FROM crm_tool_events ORDER BY created_at')->fetchAll());
+    $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('inventory_revision','inventory_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
+    return [
+        'materials' => $materials, 'suppliers' => $suppliers, 'supplyNeeds' => $needs, 'purchases' => $purchases,
+        'stockDocuments' => $documents, 'tools' => $tools, 'toolEvents' => $events,
+        'inventoryRevision' => (int)($settings['inventory_revision'] ?? 0), 'inventoryInitialized' => ($settings['inventory_initialized'] ?? '0') === '1',
+    ];
+}
+
+function crm_inventory_save(array $inventory, array $user, int $baseRevision): array {
+    crm_schema_ensure_v30();
+    $db = crm_db();
+    $materials = crm_workspace_rows($inventory['materials'] ?? null, 'материалы', 20000);
+    $suppliers = crm_workspace_rows($inventory['suppliers'] ?? null, 'поставщики', 10000);
+    $needs = crm_workspace_rows($inventory['supplyNeeds'] ?? null, 'потребности', 30000);
+    $purchases = crm_workspace_rows($inventory['purchases'] ?? null, 'закупки', 30000);
+    $documents = crm_workspace_rows($inventory['stockDocuments'] ?? null, 'движения', 50000);
+    $tools = crm_workspace_rows($inventory['tools'] ?? null, 'инструмент', 30000);
+    $events = crm_workspace_rows($inventory['toolEvents'] ?? null, 'история инструмента', 100000);
+    $db->beginTransaction();
+    try {
+        $lock = $db->prepare("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('inventory_revision','inventory_initialized') FOR UPDATE");
+        $lock->execute(); $settings = $lock->fetchAll(PDO::FETCH_KEY_PAIR); $revision = (int)($settings['inventory_revision'] ?? 0);
+        if ($revision !== $baseRevision) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'inventory_conflict', 'message' => 'Склад уже изменил другой сотрудник. Данные обновлены; повторите действие.'], 409); }
+        $db->exec('DELETE FROM crm_tool_events'); $db->exec('DELETE FROM crm_tools'); $db->exec('DELETE FROM crm_stock_documents');
+        $db->exec('DELETE FROM crm_purchases'); $db->exec('DELETE FROM crm_supply_needs'); $db->exec('DELETE FROM crm_suppliers'); $db->exec('DELETE FROM crm_materials');
+        $materialIds = []; $materialTracked = [];
+        $insert = $db->prepare('INSERT INTO crm_materials (id,name,category,unit_name,price_cents,tracked,min_stock,source_name,price_note) VALUES (?,?,?,?,?,?,?,?,?)');
+        foreach ($materials as $row) {
+            $id = crm_required_text($row['id'] ?? '', 'код материала', 120); if (isset($materialIds[$id])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Код материала повторяется.'], 422);
+            $price = (float)($row['price'] ?? -1); $minStock = (float)($row['minStock'] ?? -1); if ($price < 0 || $minStock < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте цену и минимальный запас.'], 422);
+            $materialIds[$id] = true; $materialTracked[$id] = !empty($row['tracked']); $insert->execute([$id, crm_required_text($row['name'] ?? '', 'материал', 300), crm_required_text($row['category'] ?? '', 'категория', 160), crm_required_text($row['unit'] ?? '', 'единица', 50), crm_money_cents($price), $materialTracked[$id] ? 1 : 0, $minStock, crm_text($row['source'] ?? '', 255), crm_text($row['priceNote'] ?? '', 500)]);
+        }
+        $supplierIds = [];
+        $insert = $db->prepare('INSERT INTO crm_suppliers (id,name,contact_text,notes) VALUES (?,?,?,?)');
+        foreach ($suppliers as $row) { $id = crm_required_text($row['id'] ?? '', 'идентификатор поставщика', 36); $supplierIds[$id] = true; $insert->execute([$id, crm_required_text($row['name'] ?? '', 'поставщик', 240), crm_text($row['contact'] ?? '', 500), crm_text($row['notes'] ?? '', 10000)]); }
+        $insert = $db->prepare('INSERT INTO crm_supply_needs (id,name,need_kind,destination,quantity,unit_name,priority,need_status,needed_by,requested_by,links_json,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($needs as $row) {
+            $kind = in_array($row['kind'] ?? '', ['tool','consumable','equipment','other'], true) ? $row['kind'] : 'other'; $destination = ($row['destination'] ?? '') === 'tp' ? 'tp' : 'production';
+            $priority = in_array($row['priority'] ?? '', ['normal','high','urgent'], true) ? $row['priority'] : 'normal'; $status = in_array($row['status'] ?? '', ['requested','approved','ordered','received','rejected','cancelled'], true) ? $row['status'] : 'requested';
+            $quantity = (float)($row['quantity'] ?? 0); if ($quantity <= 0 || $quantity > 1000000) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте количество потребности.'], 422);
+            $links = is_array($row['links'] ?? null) ? array_slice(array_values($row['links']), 0, 10) : [];
+            foreach ($links as &$link) { $link = crm_text($link, 2000); if (!filter_var($link, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($link, PHP_URL_SCHEME)), ['http','https'], true)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте ссылки на товары.'], 422); } unset($link);
+            $insert->execute([crm_required_text($row['id'] ?? '', 'идентификатор потребности', 36), crm_required_text($row['name'] ?? '', 'потребность', 300), $kind, $destination, $quantity, crm_required_text($row['unit'] ?? '', 'единица', 50), $priority, $status, empty($row['neededBy']) ? null : crm_date($row['neededBy']), crm_text($row['requestedBy'] ?? '', 200), json_encode($links, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_text($row['note'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+        }
+        $purchaseIds = []; $purchaseLines = [];
+        $insert = $db->prepare('INSERT INTO crm_purchases (id,public_number,purchase_date,due_date,supplier_id,lines_json,note,created_at) VALUES (?,?,?,?,?,?,?,?)');
+        foreach ($purchases as $row) { $id = crm_required_text($row['id'] ?? '', 'идентификатор закупки', 36); $supplierId = crm_required_text($row['supplierId'] ?? '', 'поставщик', 36); if (!isset($supplierIds[$supplierId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Поставщик закупки не найден.'], 422); $purchaseIds[$id] = true; $lines = crm_inventory_lines($row['lines'] ?? null, $materialIds); $purchaseLines[$id] = array_column($lines, 'quantity', 'itemId'); $insert->execute([$id, crm_required_text($row['number'] ?? '', 'номер закупки', 40), crm_date($row['date'] ?? ''), empty($row['dueDate']) ? null : crm_date($row['dueDate']), $supplierId, json_encode($lines, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_text($row['note'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]); }
+        $insert = $db->prepare('INSERT INTO crm_stock_documents (id,public_number,document_date,document_kind,target_name,supplier_id,purchase_id,order_id,reference_text,note,lines_json,total_cents,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $stockLevels = []; $received = [];
+        foreach ($documents as $row) {
+            $kind = in_array($row['kind'] ?? '', ['receipt','issue','return','writeoff','direct'], true) ? $row['kind'] : ''; if ($kind === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте вид движения.'], 422);
+            $supplierId = crm_text($row['supplierId'] ?? '', 36); $purchaseId = crm_text($row['purchaseId'] ?? '', 36);
+            if ($supplierId !== '' && !isset($supplierIds[$supplierId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Поставщик движения не найден.'], 422);
+            if ($purchaseId !== '' && !isset($purchaseIds[$purchaseId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Закупка движения не найдена.'], 422);
+            $lines = crm_inventory_lines($row['lines'] ?? null, $materialIds); $total = 0.0;
+            foreach ($lines as $line) {
+                $itemId = $line['itemId']; $total += $line['quantity'] * $line['price'];
+                if ($kind !== 'direct' && empty($materialTracked[$itemId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Включите складской учёт для всех позиций движения.'], 422);
+                if (in_array($kind, ['receipt','return'], true)) $stockLevels[$itemId] = ($stockLevels[$itemId] ?? 0) + $line['quantity'];
+                if (in_array($kind, ['issue','writeoff'], true)) { $stockLevels[$itemId] = ($stockLevels[$itemId] ?? 0) - $line['quantity']; if ($stockLevels[$itemId] < -0.0001) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Расход не может превышать складской остаток.'], 422); }
+                if ($purchaseId !== '') { $received[$purchaseId][$itemId] = ($received[$purchaseId][$itemId] ?? 0) + $line['quantity']; if (!isset($purchaseLines[$purchaseId][$itemId]) || $received[$purchaseId][$itemId] > $purchaseLines[$purchaseId][$itemId] + 0.0001) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Поступление превышает количество в закупке.'], 422); }
+            }
+            $insert->execute([crm_required_text($row['id'] ?? '', 'идентификатор движения', 36), crm_required_text($row['number'] ?? '', 'номер движения', 40), crm_date($row['date'] ?? ''), $kind, crm_required_text($row['target'] ?? '', 'получатель или основание', 500), $supplierId ?: null, $purchaseId ?: null, crm_text($row['orderId'] ?? '', 36) ?: null, crm_text($row['reference'] ?? '', 500), crm_text($row['note'] ?? '', 10000), json_encode($lines, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_money_cents($total), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+        }
+        $toolIds = [];
+        $insert = $db->prepare('INSERT INTO crm_tools (id,name,inventory_number,home_kind,price_cents,note,holder_type,holder_id,due_date) VALUES (?,?,?,?,?,?,?,?,?)');
+        foreach ($tools as $row) { $id = crm_required_text($row['id'] ?? '', 'идентификатор инструмента', 36); $toolIds[$id] = true; $holderType = in_array($row['holderType'] ?? '', ['employee','crew'], true) ? $row['holderType'] : ''; $insert->execute([$id, crm_required_text($row['name'] ?? '', 'инструмент', 300), crm_required_text($row['serial'] ?? '', 'инвентарный номер', 120), ($row['home'] ?? '') === 'field' ? 'field' : 'production', crm_money_cents($row['price'] ?? 0), crm_text($row['note'] ?? '', 10000), $holderType, $holderType === '' ? null : crm_text($row['holderId'] ?? '', 36), empty($row['dueDate']) ? null : crm_date($row['dueDate'])]); }
+        $insert = $db->prepare('INSERT INTO crm_tool_events (id,tool_id,tool_name,inventory_number,event_kind,holder_name,event_date,due_date,note) VALUES (?,?,?,?,?,?,?,?,?)');
+        foreach ($events as $row) { $toolId = crm_required_text($row['toolId'] ?? '', 'инструмент события', 36); if (!isset($toolIds[$toolId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Инструмент события не найден.'], 422); $kind = ($row['kind'] ?? '') === 'return' ? 'return' : 'issue'; $insert->execute([crm_required_text($row['id'] ?? '', 'идентификатор события', 36), $toolId, crm_required_text($row['toolName'] ?? '', 'инструмент', 300), crm_required_text($row['serial'] ?? '', 'инвентарный номер', 120), $kind, crm_required_text($row['holder'] ?? '', 'получатель', 240), crm_date($row['date'] ?? ''), empty($row['dueDate']) ? null : crm_date($row['dueDate']), crm_text($row['note'] ?? '', 10000)]); }
+        $nextRevision = $revision + 1; $db->prepare("UPDATE crm_settings SET setting_value = ? WHERE setting_key = 'inventory_revision'")->execute([(string)$nextRevision]); $db->prepare("UPDATE crm_settings SET setting_value = '1' WHERE setting_key = 'inventory_initialized'")->execute();
+        $db->commit(); crm_audit((int)$user['id'], 'inventory.save', 'inventory', (string)$nextRevision, ['materials' => count($materials), 'documents' => count($documents), 'tools' => count($tools)]); return crm_public_inventory();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+}
+
 function crm_workspace_for_user(array $user): array {
     $workspace = crm_public_workspace();
     if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) return $workspace;
@@ -303,7 +434,7 @@ function crm_workspace_rows(mixed $value, string $label, int $limit = 50000): ar
 }
 
 function crm_workspace_save(array $workspace, array $user, int $baseRevision, bool $initialize): array {
-    crm_schema_ensure_v29();
+    crm_schema_ensure_v30();
     $db = crm_db();
     $clients = crm_workspace_rows($workspace['clients'] ?? null, 'клиенты', 20000);
     $sites = crm_workspace_rows($workspace['sites'] ?? null, 'объекты', 30000);

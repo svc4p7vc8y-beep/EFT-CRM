@@ -37,6 +37,15 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(api, /move_uploaded_file/);
   assert.match(bootstrap, /function crm_avatar_key/);
   assert.match(bootstrap, /function crm_public_crews/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_materials/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_supply_needs/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_stock_documents/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_tools/);
+  assert.match(api, /inventory\.save/);
+  assert.match(api, /crm_require_capability\('procurement\.manage'\)/);
+  assert.match(bootstrap, /function crm_public_inventory/);
+  assert.match(bootstrap, /function crm_inventory_save/);
+  assert.match(bootstrap, /inventory_conflict/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);
 });

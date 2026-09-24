@@ -27,18 +27,25 @@ const navigation = [
 const getRoute = () => { const hash = window.location.hash.slice(1); const match = hash.match(/^client\/(.+)$/); if (match) return { page: 'client', leadId: decodeURIComponent(match[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '' }; };
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
-const serverActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check']);
+const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check']);
+const inventoryServerActions = new Set(['material.save','supplier.save','need.save','purchase.create','stock.post','tool.save','tool.transfer']);
 
 export function App({ runtime = { mode: 'demo' } }) {
   const { state: localState, command, storageError, replace } = useWorkspace();
   const liveSession = runtime.mode === 'server'; const sessionUser = runtime.user;
   const canSaveWorkspace = !liveSession || runtime.capabilities?.includes('*') || (runtime.capabilities?.includes('clients.manage') && runtime.capabilities?.includes('tasks.manage'));
+  const canSaveInventory = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('procurement.manage');
   const [serverOverride, setServerOverride] = useState(null);
+  const [inventoryOverride, setInventoryOverride] = useState(null);
   const revisionRef = useRef(Number(runtime.serverData?.workspaceRevision || 0));
+  const inventoryRevisionRef = useRef(Number(runtime.serverData?.inventoryRevision || 0));
   const saveQueue = useRef(Promise.resolve());
+  const inventorySaveQueue = useRef(Promise.resolve());
   const initializing = useRef(false);
   const serverCore = serverOverride || runtime.serverData || {};
-  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [] } : localState;
+  const serverInventory = inventoryOverride || runtime.serverData || {};
+  const inventorySource = serverInventory.inventoryInitialized === false ? localState : serverInventory;
+  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
   const personnelState = state;
   const initialRoute = getRoute();
   const themeKey = `eft-crm-theme:${sessionUser?.username || 'local'}`;
@@ -52,6 +59,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   useEffect(() => { const id=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(id); }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem(themeKey, theme); const color = theme === 'dark' ? '#101820' : theme === 'brand' ? '#282b27' : '#142b3b'; document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color); }, [theme, themeKey]);
   useEffect(() => { revisionRef.current = Number(runtime.serverData?.workspaceRevision || revisionRef.current); }, [runtime.serverData?.workspaceRevision]);
+  useEffect(() => { inventoryRevisionRef.current = Number(runtime.serverData?.inventoryRevision || inventoryRevisionRef.current); }, [runtime.serverData?.inventoryRevision]);
   useEffect(() => {
     if (!liveSession || !canSaveWorkspace || runtime.serverData?.workspaceInitialized !== false || initializing.current || !runtime.saveWorkspace) return;
     initializing.current = true;
@@ -63,9 +71,10 @@ export function App({ runtime = { mode: 'demo' } }) {
   function navigate(id) { const item = navigation.find((v) => v.id === id); if (item?.planned) { setModal({ type: 'planned', id }); return; } setPage(id); setSearch(''); setSidebar(false); window.location.hash = id; }
   function mutate(action, payload, message = 'Сохранено') {
     if (!liveSession) { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
-    if (serverActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
+    if (coreServerActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
+    if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
     const next = applyCommand(state, action, payload); replace(next); setToast({ text: message, error: false });
-    if (serverActions.has(action) && runtime.saveWorkspace) {
+    if (coreServerActions.has(action) && runtime.saveWorkspace) {
       const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities };
       setServerOverride(snapshot);
       saveQueue.current = saveQueue.current.then(() => runtime.saveWorkspace(snapshot, revisionRef.current, false)).then((saved) => {
@@ -73,6 +82,16 @@ export function App({ runtime = { mode: 'demo' } }) {
       }).catch(async (error) => {
         setToast({ text: error.message, error: true });
         try { const fresh = await runtime.refreshWorkspace?.(); if (fresh) { revisionRef.current = fresh.workspaceRevision; setServerOverride(fresh); } } catch { /* The original error is more useful. */ }
+      });
+    }
+    if (inventoryServerActions.has(action) && runtime.saveInventory) {
+      const snapshot = { materials: next.materials, suppliers: next.suppliers, supplyNeeds: next.supplyNeeds, purchases: next.purchases, stockDocuments: next.stockDocuments, tools: next.tools, toolEvents: next.toolEvents };
+      setInventoryOverride({ ...snapshot, inventoryInitialized: true, inventoryRevision: inventoryRevisionRef.current });
+      inventorySaveQueue.current = inventorySaveQueue.current.then(() => runtime.saveInventory(snapshot, inventoryRevisionRef.current)).then((saved) => {
+        inventoryRevisionRef.current = saved.inventoryRevision; setInventoryOverride(saved);
+      }).catch(async (error) => {
+        setToast({ text: error.message, error: true });
+        try { const fresh = await runtime.refreshWorkspace?.(); if (fresh) { inventoryRevisionRef.current = fresh.inventoryRevision; setInventoryOverride(fresh); } } catch { /* The original error is more useful. */ }
       });
     }
     return next;
@@ -110,7 +129,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
-      {page === 'supplies' ? <Inventory state={state} command={command} search={search}/> : null}
+      {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} runtime={runtime} /> : null}
