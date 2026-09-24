@@ -154,7 +154,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
-      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} runtime={runtime} /> : null}
+      {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} command={mutate} runtime={runtime} /> : null}
     </main></div>{dialog}{toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19} /> : <CircleCheck size={19} />}<span>{toast.text}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="Закрыть уведомление"><X size={15} /></button></div> : null}
   </div>;
 }

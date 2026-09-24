@@ -38,11 +38,12 @@ test('сотрудников и бригады можно добавлять, р
   const person = state.employees.at(-1);
   assert.equal(person.role, 'Электрик');
   state = applyCommand(state, 'crew.save', { name: 'Электромонтаж', specialty: 'Электрика', memberIds: [person.id], leadId: person.id, active: true });
-  assert.deepEqual(state.crews[0].memberIds, [person.id]);
+  const crew = state.crews.find((item) => item.name === 'Электромонтаж');
+  assert.deepEqual(crew.memberIds, [person.id]);
   assert.throws(() => applyCommand(state, 'crew.save', { name: 'Другая', memberIds: [], leadId: person.id }), /Бригадир/);
   state = applyCommand(state, 'employee.save', { id: person.id, name: 'Тестовый электрик', role: 'Бригадир', active: false });
   assert.equal(state.employees.find((p) => p.id === person.id).active, false);
-  assert.equal(state.crews[0].leadId, person.id);
+  assert.equal(state.crews.find((item) => item.name === 'Электромонтаж').leadId, person.id);
 });
 test('старый формат данных получает справочники персонала без потери заявок', () => {
   const old = createDemoState(); delete old.employees; delete old.crews;
