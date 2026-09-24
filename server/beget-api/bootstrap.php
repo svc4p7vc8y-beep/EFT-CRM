@@ -204,6 +204,7 @@ function crm_schema_ensure_v30(): void {
         ],
         'crm_tasks' => [
             'order_id' => "CHAR(36) NULL AFTER id",
+            'construction_stage_id' => "CHAR(36) NULL AFTER crew_id",
             'quantity' => "DECIMAL(12,2) NOT NULL DEFAULT 1 AFTER due_at",
             'completed_quantity' => "DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity",
             'unit_name' => "VARCHAR(80) NOT NULL DEFAULT 'задача' AFTER completed_quantity",
@@ -277,7 +278,7 @@ function crm_public_workspace(): array {
         $checklist = json_decode((string)($row['checklist_json'] ?? '[]'), true);
         $history = json_decode((string)($row['reschedule_history_json'] ?? '[]'), true);
         return [
-            'id' => $row['id'], 'orderId' => $row['order_id'] ?: '', 'title' => $row['title'], 'description' => $row['description'],
+            'id' => $row['id'], 'orderId' => $row['order_id'] ?: '', 'siteId' => $row['site_id'] ?: '', 'constructionStageId' => $row['construction_stage_id'] ?: '', 'crewId' => $row['crew_id'] ?: '', 'title' => $row['title'], 'description' => $row['description'],
             'assigneeId' => $row['assignee_id'] ?: '', 'status' => $row['status'], 'priority' => $row['priority'], 'dueAt' => crm_db_datetime($row['due_at']),
             'quantity' => (float)$row['quantity'], 'completedQty' => (float)$row['completed_quantity'], 'unit' => $row['unit_name'],
             'blockReason' => $row['block_reason'] ?: '', 'checklist' => is_array($checklist) ? $checklist : [],
@@ -532,14 +533,18 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $insertOrder->execute([crm_required_text($row['id'] ?? '', 'идентификатор заказа', 36), crm_required_text($row['number'] ?? '', 'номер заказа', 32), crm_required_text($row['siteId'] ?? '', 'объект заказа', 36), crm_text($row['leadId'] ?? '', 36) ?: null, crm_required_text($row['scope'] ?? '', 'комплектация заказа', 10000), crm_text($row['reference'] ?? '', 1000), $approvedBy ?: null, crm_sql_datetime($row['approvedAt'] ?? ''), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
         $orderSites = $db->query('SELECT id, site_id FROM crm_orders')->fetchAll(PDO::FETCH_KEY_PAIR);
-        $insertTask = $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stageSites = $db->query('SELECT id, site_id FROM crm_construction_stages')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $insertTask = $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($tasks as $row) {
             $orderId = crm_text($row['orderId'] ?? '', 36); $assignee = crm_text($row['assigneeId'] ?? '', 36); if (!isset($employeeIds[$assignee])) $assignee = '';
+            $siteId = crm_text($row['siteId'] ?? '', 36) ?: ($orderSites[$orderId] ?? ''); if (!isset($siteIds[$siteId])) $siteId = '';
+            $crewId = crm_text($row['crewId'] ?? '', 36); if (!isset($crewIds[$crewId])) $crewId = '';
+            $stageId = crm_text($row['constructionStageId'] ?? '', 36); if (!isset($stageSites[$stageId]) || $stageSites[$stageId] !== $siteId) $stageId = '';
             $status = in_array($row['status'] ?? '', ['planned','doing','review','blocked','done'], true) ? $row['status'] : 'planned';
             $priority = ($row['priority'] ?? '') === 'high' ? 'high' : 'normal';
             $quantity = (float)($row['quantity'] ?? 1); $completed = (float)($row['completedQty'] ?? 0);
             if ($quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
-            $insertTask->execute([crm_required_text($row['id'] ?? '', 'идентификатор задачи', 36), $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $orderSites[$orderId] ?? null, $assignee ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+            $insertTask->execute([crm_required_text($row['id'] ?? '', 'идентификатор задачи', 36), $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
         $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {

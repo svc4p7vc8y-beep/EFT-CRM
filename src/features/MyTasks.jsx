@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertCircle, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutGrid, List, Plus, RotateCcw, Users } from 'lucide-react';
 import { Avatar, Badge, Empty, VoiceInput } from '../components/UI.jsx';
-import { TASK_STAGES, dateKey, dateLabel, employee } from '../app/model.js';
+import { TASK_STAGES, dateKey, dateLabel, employee, taskContext } from '../app/model.js';
 import './my-tasks.css';
 
 const dayOf = (value) => value?.slice(0, 10) || '';
@@ -13,12 +13,12 @@ const monthTitle = (value) => atNoon(value).toLocaleDateString('ru-RU', { month:
 const dayTitle = (value) => atNoon(value).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'short' });
 
 function TaskRow({ state, task, carried = false, selected, onSelect, onOpen, onMove, onReschedule }) {
-  const order = state.orders.find((item) => item.id === task.orderId); const site = state.sites.find((item) => item.id === order?.siteId);
+  const { order, site, stage } = taskContext(state, task);
   function move(days) { onReschedule(task.id, `${shiftDay(dayOf(task.dueAt) || dateKey(), days)}T${timeOf(task.dueAt)}`); }
   return <article className={`my-task-row${selected ? ' selected' : ''}`} onClick={() => onSelect(task.id)}>
     <button className={`task-check ${task.status === 'done' ? 'done' : ''}`} type="button" aria-label={task.status === 'done' ? 'Задача выполнена' : 'Отметить выполненной'} onClick={(event) => { event.stopPropagation(); if (task.status !== 'done') onMove(task.id, 'done'); }}>{task.status === 'done' ? <Check size={15} /> : null}</button>
     <time>{timeOf(task.dueAt)}</time><button className="task-row-title" type="button" onClick={(event) => { event.stopPropagation(); onOpen(task.id); }}><strong>{task.title}</strong>{carried ? <small>Было: {dateLabel(task.dueAt, false)}</small> : null}</button>
-    <span className="task-project">{site?.name || order?.number || 'Без проекта'}</span><span className={`priority ${task.priority}`}>{task.priority === 'high' ? 'Высокий' : 'Обычный'}</span>
+    <span className="task-project">{site?.name || order?.number || 'Без проекта'}{stage ? <small>{stage.title}</small> : null}</span><span className={`priority ${task.priority}`}>{task.priority === 'high' ? 'Высокий' : 'Обычный'}</span>
     <span className="task-person"><Avatar id={task.assigneeId} state={state} /><span>{employee(task.assigneeId, state)?.name || 'Не назначен'}</span></span><Badge value={task.status} stages={TASK_STAGES} />
     {carried ? <span className="task-shifts"><button type="button" onClick={(event) => { event.stopPropagation(); move(1); }}>+1 день</button><button type="button" onClick={(event) => { event.stopPropagation(); move(2); }}>+2 дня</button><button type="button" onClick={(event) => { event.stopPropagation(); move(3); }}>+3 дня</button><label title="Выбрать дату"><CalendarDays size={15} /><input type="date" aria-label="Перенести на выбранную дату" onClick={(event) => event.stopPropagation()} onChange={(event) => { if (event.target.value) onReschedule(task.id, `${event.target.value}T${timeOf(task.dueAt)}`); }} /></label></span> : null}
   </article>;
@@ -26,9 +26,9 @@ function TaskRow({ state, task, carried = false, selected, onSelect, onOpen, onM
 
 function TaskDetails({ state, task, onOpen, onReschedule }) {
   if (!task) return <aside className="task-side empty-side"><ClipboardCheck size={28} /><strong>Выберите задачу</strong><span>Здесь появятся детали, срок и чек-лист.</span></aside>;
-  const person = employee(task.assigneeId, state); const done = task.checklist.filter((item) => item.done).length;
+  const person = employee(task.assigneeId, state); const done = task.checklist.filter((item) => item.done).length; const { site, stage, crew } = taskContext(state, task);
   return <aside className="task-side"><div className="task-side-head"><div><h2>{task.title}</h2><span className={`priority ${task.priority}`}>{task.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}</span></div><button className="text-link" onClick={() => onOpen(task.id)}>Открыть</button></div>
-    <dl><dt>Ответственный</dt><dd><Avatar id={task.assigneeId} state={state} />{person?.name || 'Не назначен'}</dd><dt>Срок выполнения</dt><dd>{dateLabel(task.dueAt)}</dd><dt>Статус</dt><dd><Badge value={task.status} stages={TASK_STAGES} /></dd></dl>
+    <dl><dt>Ответственный</dt><dd><Avatar id={task.assigneeId} state={state} />{person?.name || 'Не назначен'}</dd><dt>Объект</dt><dd>{site?.name || 'Не привязан'}</dd>{stage ? <><dt>Этап</dt><dd>{stage.title}</dd></> : null}{crew ? <><dt>Бригада</dt><dd>{crew.name}</dd></> : null}<dt>Срок выполнения</dt><dd>{dateLabel(task.dueAt)}</dd><dt>Статус</dt><dd><Badge value={task.status} stages={TASK_STAGES} /></dd></dl>
     <section><h3>Описание</h3><p>{task.description || 'Описание не добавлено.'}</p></section><section><h3>Чек-лист ({done} из {task.checklist.length})</h3>{task.checklist.length ? <ul>{task.checklist.map((item) => <li className={item.done ? 'done' : ''} key={item.id}><span>{item.done ? <Check size={12} /> : null}</span>{item.title}</li>)}</ul> : <p>Чек-лист пока пуст.</p>}</section>
     {task.rescheduleHistory.length ? <section><h3>История переноса</h3><p>{task.rescheduleHistory.length} измен. · первый срок {dateLabel(task.originalDueAt || task.rescheduleHistory.at(-1)?.from)}</p></section> : null}
     <div className="task-side-actions"><button className="button" onClick={() => onReschedule(task.id, `${shiftDay(dayOf(task.dueAt), 1)}T${timeOf(task.dueAt)}`)}><RotateCcw size={15} />Перенести на день</button><button className="button primary" onClick={() => onOpen(task.id)}>Редактировать</button></div>

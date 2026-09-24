@@ -78,3 +78,9 @@ test('этап строительства проверяет задержку, �
   assert.equal(state.constructionStages.find((item) => item.id === stage.id).comments[0].text, 'Завезён материал');
   assert.throws(() => applyCommand(state, 'construction.stage.save', { id: stage.id, dependencyIds: [stage.id] }), /зависимости/);
 });
+test('задача связывается с объектом, этапом и бригадой', () => {
+  const original = createDemoState(); const stage = original.constructionStages[2];
+  const state = applyCommand(original, 'task.create', { title: 'Монтаж этапа', description: '', orderId: '', siteId: stage.siteId, constructionStageId: stage.id, crewId: 'crew-1', assigneeId: '', status: 'planned', priority: 'high', dueAt: '2026-10-10T17:00', quantity: 1, completedQty: 0, unit: 'этап', blockReason: '' });
+  assert.equal(state.tasks[0].siteId, stage.siteId); assert.equal(state.tasks[0].constructionStageId, stage.id); assert.equal(state.tasks[0].crewId, 'crew-1');
+  assert.throws(() => applyCommand(state, 'task.create', { title: 'Неверная связь', siteId: 'site-2', constructionStageId: stage.id, status: 'planned', priority: 'normal', dueAt: '2026-10-10T17:00', quantity: 1, completedQty: 0, unit: 'этап' }), /этап этого объекта/);
+});

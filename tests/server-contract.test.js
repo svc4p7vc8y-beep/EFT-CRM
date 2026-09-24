@@ -41,10 +41,12 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_supply_needs/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_stock_documents/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS crm_tools/);
+  assert.match(schema, /construction_stage_id CHAR\(36\)/);
   assert.match(api, /inventory\.save/);
   assert.match(api, /crm_require_capability\('procurement\.manage'\)/);
   assert.match(bootstrap, /function crm_public_inventory/);
   assert.match(bootstrap, /function crm_inventory_save/);
+  assert.match(bootstrap, /'constructionStageId' => \$row\['construction_stage_id'\]/);
   assert.match(bootstrap, /inventory_conflict/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);

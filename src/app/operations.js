@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 32;
+export const RELEASE = 33;
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -29,7 +29,7 @@ export function extendWorkspace(state) {
     site.actualStart ??= ''; site.actualFinish ??= ''; site.notes ??= '';
   });
   state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; person.advanceAmount ??= 0; });
-  state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; });
+  state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; task.siteId ||= state.orders?.find((order) => order.id === task.orderId)?.siteId || ''; task.crewId ??= ''; task.constructionStageId ??= ''; });
   state.constructionStages?.forEach((stage) => { stage.dependencyIds ??= []; stage.comments ??= []; stage.attachments ??= []; stage.notes ??= ''; stage.blockReason ??= ''; stage.actualStart ??= ''; stage.actualFinish ??= ''; stage.assigneeId ??= ''; stage.crewId ??= ''; });
   return state;
 }

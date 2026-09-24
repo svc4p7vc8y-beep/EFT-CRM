@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS crm_construction_stages (
   actual_finish DATE NULL,
   assignee_id CHAR(36) NULL,
   crew_id CHAR(36) NULL,
+  construction_stage_id CHAR(36) NULL,
   dependency_ids_json JSON NULL,
   notes TEXT NULL,
   block_reason TEXT NULL,
@@ -191,9 +192,11 @@ CREATE TABLE IF NOT EXISTS crm_tasks (
   PRIMARY KEY (id),
   KEY idx_crm_tasks_assignee (assignee_id, status, due_at),
   KEY idx_crm_tasks_crew (crew_id, status, due_at),
+  KEY idx_crm_tasks_stage (construction_stage_id, status, due_at),
   CONSTRAINT fk_crm_tasks_site FOREIGN KEY (site_id) REFERENCES crm_sites(id) ON DELETE SET NULL,
   CONSTRAINT fk_crm_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES crm_employees(id) ON DELETE SET NULL,
   CONSTRAINT fk_crm_tasks_crew FOREIGN KEY (crew_id) REFERENCES crm_crews(id) ON DELETE SET NULL,
+  CONSTRAINT fk_crm_tasks_stage FOREIGN KEY (construction_stage_id) REFERENCES crm_construction_stages(id) ON DELETE SET NULL,
   CONSTRAINT fk_crm_tasks_created_by FOREIGN KEY (created_by) REFERENCES crm_users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
