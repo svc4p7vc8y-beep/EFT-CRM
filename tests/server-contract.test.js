@@ -75,3 +75,12 @@ test('одноразовый установщик закрывается пос�
   assert.match(installer, /rename\(\$temporaryPath, \$configPath\)/);
   assert.doesNotMatch(installer, /echo\s+\$dbPassword/);
 });
+
+test('закупки подтверждают серверное сохранение до закрытия формы', () => {
+  const app = read('src/app/App.jsx');
+  const inventory = read('src/features/Inventory.jsx');
+  assert.match(app, /const persistence = inventorySaveQueue\.current/);
+  assert.match(app, /return persistence\.then\(\(\) => next\)/);
+  assert.match(inventory, /async function commit\(action,payload\) \{ await command\(action,payload\); close\(\)/);
+  assert.match(inventory, /Сохранено в базе данных/);
+});

@@ -89,7 +89,8 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (!liveSession) { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
     if (coreServerActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
     if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
-    const next = applyCommand(state, action, payload); replace(next); setToast({ text: message, error: false });
+    const next = applyCommand(state, action, payload); replace(next);
+    if (!inventoryServerActions.has(action)) setToast({ text: message, error: false });
     if (coreServerActions.has(action) && runtime.saveWorkspace) {
       const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities, constructionStages: next.constructionStages, logistics: next.logistics };
       setServerOverride(snapshot);
@@ -103,12 +104,16 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (inventoryServerActions.has(action) && runtime.saveInventory) {
       const snapshot = { materials: next.materials, suppliers: next.suppliers, supplyNeeds: next.supplyNeeds, purchases: next.purchases, stockDocuments: next.stockDocuments, tools: next.tools, toolEvents: next.toolEvents };
       setInventoryOverride({ ...snapshot, inventoryInitialized: true, inventoryRevision: inventoryRevisionRef.current });
-      inventorySaveQueue.current = inventorySaveQueue.current.then(() => runtime.saveInventory(snapshot, inventoryRevisionRef.current)).then((saved) => {
+      const persistence = inventorySaveQueue.current.then(() => runtime.saveInventory(snapshot, inventoryRevisionRef.current)).then((saved) => {
         inventoryRevisionRef.current = saved.inventoryRevision; setInventoryOverride(saved);
+        setToast({ text: message, error: false }); return saved;
       }).catch(async (error) => {
-        setToast({ text: error.message, error: true });
+        setToast({ text: `Не сохранено: ${error.message}`, error: true });
         try { const fresh = await runtime.refreshWorkspace?.(); if (fresh) { inventoryRevisionRef.current = fresh.inventoryRevision; setInventoryOverride(fresh); } } catch { /* The original error is more useful. */ }
+        throw error;
       });
+      inventorySaveQueue.current = persistence.catch(() => undefined);
+      return persistence.then(() => next);
     }
     return next;
   }
