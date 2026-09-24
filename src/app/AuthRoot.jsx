@@ -107,6 +107,7 @@ export function AuthRoot() {
       updateWorkspace(result);
       return initialize ? refreshWorkspace() : result;
     },
+    uploadConstructionPhoto: async (stageId, file) => { await crmApi.uploadConstructionPhoto(stageId, file); return refreshWorkspace(); },
     saveInventory: async (inventory, baseRevision) => {
       const result = await crmApi.saveInventory(inventory, baseRevision);
       updateWorkspace(result);

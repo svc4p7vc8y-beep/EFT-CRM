@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Search, ChevronDown, Home, ClipboardList, Users, MessageSquare, Factory, CheckSquare, CalendarDays, Package, HardHat, Truck, Database, Menu, X, CircleCheck, AlertCircle, Settings2, LogOut, ShieldCheck } from 'lucide-react';
+import { Bell, Search, ChevronDown, Home, ClipboardList, Users, MessageSquare, Factory, CheckSquare, CalendarDays, Package, HardHat, Truck, Database, Menu, X, CircleCheck, AlertCircle, Settings2, LogOut, ShieldCheck, House } from 'lucide-react';
 import { useWorkspace } from './useWorkspace.js';
 import { applyCommand, createDemoState, employee, isOverdue, leadContext } from './model.js';
 import { Dialog, VoiceInput } from '../components/UI.jsx';
@@ -14,20 +14,21 @@ import { Inventory } from '../features/Inventory.jsx';
 import { Attendance } from '../features/Attendance.jsx';
 import { ClientWorkspace } from '../features/ClientWorkspace.jsx';
 import { MyTasks } from '../features/MyTasks.jsx';
+import { Construction } from '../features/Construction.jsx';
 import { RELEASE } from './operations.js';
 import { employeeFromApi } from './api.js';
 import './app.css';
 import './operations.css';
 
 const navigation = [
-  { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'communications', label: 'Общение', icon: MessageSquare },
+  { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'construction', label: 'Строительство', icon: House }, { id: 'communications', label: 'Общение', icon: MessageSquare },
   { id: 'production', label: 'Производство', icon: Factory, separator: true }, { id: 'tasks', label: 'Мои задачи', icon: CheckSquare }, { id: 'calendar', label: 'Календарь', icon: CalendarDays }, { id: 'attendance', label: 'Табель', icon: ClipboardList },
   { id: 'supplies', label: 'Закупки и склад', icon: Package, separator: true }, { id: 'crews', label: 'Бригады', icon: HardHat }, { id: 'logistics', label: 'Логистика', icon: Truck, planned: true }, { id: 'settings', label: 'Настройки', icon: Settings2, separator: true },
 ];
-const getRoute = () => { const hash = window.location.hash.slice(1); const match = hash.match(/^client\/(.+)$/); if (match) return { page: 'client', leadId: decodeURIComponent(match[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '' }; };
+const getRoute = () => { const hash = window.location.hash.slice(1); const client = hash.match(/^client\/(.+)$/); if (client) return { page: 'client', leadId: decodeURIComponent(client[1]), siteId: '' }; const construction = hash.match(/^construction\/(.+)$/); if (construction) return { page: 'construction', leadId: '', siteId: decodeURIComponent(construction[1]) }; return { page: navigation.some((v) => v.id === hash && !v.planned) ? hash : 'leads', leadId: '', siteId: '' }; };
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
-const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check']);
+const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment']);
 const inventoryServerActions = new Set(['material.save','supplier.save','need.save','purchase.create','stock.post','tool.save','tool.transfer']);
 
 export function App({ runtime = { mode: 'demo' } }) {
@@ -47,15 +48,15 @@ export function App({ runtime = { mode: 'demo' } }) {
   const serverInventory = inventoryOverride || runtime.serverData || {};
   const localInventory = useMemo(() => localState.materials?.length ? localState : createDemoState(), [localState]);
   const inventorySource = serverInventory.inventoryInitialized === false ? localInventory : serverInventory;
-  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
+  const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], constructionStages: serverCore.constructionStages || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
   const personnelState = state;
   const initialRoute = getRoute();
   const themeKey = `eft-crm-theme:${sessionUser?.username || 'local'}`;
-  const [page, setPage] = useState(initialRoute.page); const [search, setSearch] = useState(''); const [selectedLead, setSelectedLead] = useState(initialRoute.leadId); const [modal, setModal] = useState(null); const [toast, setToast] = useState(null); const [sidebar, setSidebar] = useState(false); const [now,setNow]=useState(()=>new Date());
+  const [page, setPage] = useState(initialRoute.page); const [search, setSearch] = useState(''); const [selectedLead, setSelectedLead] = useState(initialRoute.leadId); const [selectedSite, setSelectedSite] = useState(initialRoute.siteId); const [modal, setModal] = useState(null); const [toast, setToast] = useState(null); const [sidebar, setSidebar] = useState(false); const [now,setNow]=useState(()=>new Date());
   const [theme, setTheme] = useState(() => { const saved = localStorage.getItem(themeKey); return ['light', 'dark', 'brand'].includes(saved) ? saved : 'brand'; });
   const selected = state.leads.find((l) => l.id === selectedLead);
   const late = state.leads.filter((l) => l.status !== 'lost' && isOverdue(l.dueAt)); const blocked = state.tasks.filter((t) => t.status === 'blocked');
-  useEffect(() => { const change = () => { const route = getRoute(); setPage(route.page); if (route.leadId) setSelectedLead(route.leadId); setSearch(''); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
+  useEffect(() => { const change = () => { const route = getRoute(); setPage(route.page); setSelectedLead(route.leadId); setSelectedSite(route.siteId); setSearch(''); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [page, selectedLead]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 4500); return () => clearTimeout(id); }, [toast]);
   useEffect(() => { const id=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(id); }, []);
@@ -88,7 +89,7 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
     const next = applyCommand(state, action, payload); replace(next); setToast({ text: message, error: false });
     if (coreServerActions.has(action) && runtime.saveWorkspace) {
-      const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities };
+      const snapshot = { clients: next.clients, sites: next.sites, leads: next.leads, orders: next.orders, tasks: next.tasks, activities: next.activities, constructionStages: next.constructionStages };
       setServerOverride(snapshot);
       saveQueue.current = saveQueue.current.then(() => runtime.saveWorkspace(snapshot, revisionRef.current, false)).then((saved) => {
         revisionRef.current = saved.workspaceRevision; setServerOverride(saved);
@@ -111,6 +112,13 @@ export function App({ runtime = { mode: 'demo' } }) {
   }
   function safeMutate(action, payload, message) { try { mutate(action, payload, message); return true; } catch (e) { setToast({ text: e.message, error: true }); return false; } }
   function openLead(id) { if (!id) return; setSelectedLead(id); setPage('client'); setSearch(''); setSidebar(false); window.location.hash = `client/${encodeURIComponent(id)}`; }
+  function openSite(id) { setSelectedSite(id); setPage('construction'); setSearch(''); setSidebar(false); window.location.hash = id ? `construction/${encodeURIComponent(id)}` : 'construction'; }
+  async function uploadConstructionPhoto(stageId, file) {
+    try {
+      if (!liveSession || !runtime.uploadConstructionPhoto) throw new Error('Загрузка фотографий доступна в серверной версии CRM.');
+      const fresh = await runtime.uploadConstructionPhoto(stageId, file); revisionRef.current = Number(fresh.workspaceRevision || revisionRef.current); setServerOverride(fresh); setToast({ text: 'Фотография этапа загружена', error: false });
+    } catch (error) { setToast({ text: error.message, error: true }); throw error; }
+  }
   function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
@@ -140,7 +148,8 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'production' ? <Production key={page} {...taskProps} /> : null}
       {page === 'tasks' ? <MyTasks state={state} search={search} command={mutate} onCreate={() => setModal({ type: 'task-new' })} onOpen={(id) => setModal({ type: 'task', id })} onMove={moveTask} /> : null}
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
-      {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
+      {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
+      {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} /> : null}
       {page === 'communications' ? <Communications state={state} search={search} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}

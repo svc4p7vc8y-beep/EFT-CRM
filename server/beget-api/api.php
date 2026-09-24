@@ -303,6 +303,41 @@ if ($action === 'employees.photo' && $method === 'POST') {
     crm_json(['ok' => true, 'employee' => crm_public_employee($saved->fetch(), crm_can($user, 'finance.view') && crm_finance_unlocked())]);
 }
 
+if ($action === 'construction.photo' && $method === 'POST') {
+    crm_require_origin();
+    $user = crm_require_capability('clients.manage');
+    crm_csrf();
+    crm_schema_ensure_v30();
+    $stageId = crm_text($_POST['stageId'] ?? '', 36);
+    $statement = crm_db()->prepare('SELECT attachments_json FROM crm_construction_stages WHERE id = ?');
+    $statement->execute([$stageId]);
+    $row = $statement->fetch();
+    if (!$row) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Этап строительства не найден.'], 422);
+    $file = $_FILES['photo'] ?? null;
+    if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Не удалось загрузить фотографию.'], 422);
+    $size = (int)($file['size'] ?? 0);
+    if ($size < 1 || $size > 8 * 1024 * 1024) crm_json(['ok' => false, 'code' => 'payload_too_large', 'message' => 'Фотография должна быть не больше 8 МБ.'], 413);
+    $temporary = (string)($file['tmp_name'] ?? '');
+    if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary); $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    if (!isset($extensions[$mime])) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены фотографии JPG, PNG и WebP.'], 422);
+    $dimensions = @getimagesize($temporary);
+    if (!$dimensions || $dimensions[0] < 32 || $dimensions[1] < 32 || $dimensions[0] > 12000 || $dimensions[1] > 12000) crm_json(['ok' => false, 'code' => 'invalid_image', 'message' => 'Файл повреждён или имеет неподходящий размер.'], 422);
+    $attachments = json_decode((string)($row['attachments_json'] ?? '[]'), true); if (!is_array($attachments)) $attachments = [];
+    if (count($attachments) >= 30) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'К одному этапу можно прикрепить не больше 30 фотографий.'], 422);
+    $directory = dirname(__DIR__) . '/uploads/construction';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Cannot create construction upload directory');
+    $key = 's-' . bin2hex(random_bytes(12)) . '.' . $extensions[$mime];
+    if (!move_uploaded_file($temporary, $directory . '/' . $key)) throw new RuntimeException('Cannot store construction photo');
+    $attachments[] = ['key' => $key, 'name' => crm_text($file['name'] ?? 'Фото', 220), 'mime' => $mime, 'size' => $size, 'createdAt' => gmdate('c')];
+    crm_db()->beginTransaction();
+    crm_db()->prepare('UPDATE crm_construction_stages SET attachments_json = ? WHERE id = ?')->execute([json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $stageId]);
+    crm_db()->exec("UPDATE crm_settings SET setting_value = CAST(setting_value AS UNSIGNED) + 1 WHERE setting_key = 'workspace_revision'");
+    crm_db()->commit();
+    crm_audit((int)$user['id'], 'construction.photo', 'construction_stage', $stageId, ['mime' => $mime, 'size' => $size]);
+    crm_json(['ok' => true, 'attachment' => end($attachments)]);
+}
+
 if ($action === 'attendance.list' && $method === 'GET') {
     $user = crm_user();
     $month = (string)($_GET['month'] ?? date('Y-m'));

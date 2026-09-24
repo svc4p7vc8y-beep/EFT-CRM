@@ -217,6 +217,16 @@ function crm_schema_ensure_v30(): void {
             'activity_type' => "VARCHAR(32) NOT NULL DEFAULT 'note' AFTER task_id",
             'author_employee_id' => "CHAR(36) NULL AFTER author_id",
         ],
+        'crm_sites' => [
+            'construction_status' => "ENUM('planning','active','paused','complete') NOT NULL DEFAULT 'planning' AFTER address",
+            'manager_employee_id' => "CHAR(36) NULL AFTER construction_status",
+            'contract_number' => "VARCHAR(120) NOT NULL DEFAULT '' AFTER manager_employee_id",
+            'planned_start' => "DATE NULL AFTER contract_number",
+            'planned_finish' => "DATE NULL AFTER planned_start",
+            'actual_start' => "DATE NULL AFTER planned_finish",
+            'actual_finish' => "DATE NULL AFTER actual_start",
+            'construction_notes' => "TEXT NULL AFTER actual_finish",
+        ],
     ];
     foreach ($columns as $table => $definitions) foreach ($definitions as $column => $definition) {
         if (!crm_column_exists($table, $column)) $db->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
@@ -241,7 +251,18 @@ function crm_public_workspace(): array {
     ], $db->query('SELECT id, display_name, phone, email FROM crm_clients ORDER BY created_at')->fetchAll());
     $sites = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'clientId' => $row['client_id'], 'name' => $row['name'], 'address' => $row['address'],
-    ], $db->query('SELECT id, client_id, name, address FROM crm_sites ORDER BY created_at')->fetchAll());
+        'status' => $row['construction_status'], 'managerId' => $row['manager_employee_id'] ?: '', 'contractNumber' => $row['contract_number'],
+        'plannedStart' => $row['planned_start'] ?: '', 'plannedFinish' => $row['planned_finish'] ?: '', 'actualStart' => $row['actual_start'] ?: '',
+        'actualFinish' => $row['actual_finish'] ?: '', 'notes' => $row['construction_notes'] ?: '',
+    ], $db->query('SELECT id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes FROM crm_sites ORDER BY created_at')->fetchAll());
+    $constructionStages = array_map(static function (array $row): array {
+        $dependencies = json_decode((string)($row['dependency_ids_json'] ?? '[]'), true); $comments = json_decode((string)($row['comments_json'] ?? '[]'), true); $attachments = json_decode((string)($row['attachments_json'] ?? '[]'), true);
+        return ['id' => $row['id'], 'siteId' => $row['site_id'], 'title' => $row['title'], 'group' => $row['stage_group'], 'status' => $row['stage_status'], 'progress' => (int)$row['progress'],
+          'plannedStart' => $row['planned_start'] ?: '', 'plannedFinish' => $row['planned_finish'] ?: '', 'actualStart' => $row['actual_start'] ?: '', 'actualFinish' => $row['actual_finish'] ?: '',
+          'assigneeId' => $row['assignee_id'] ?: '', 'crewId' => $row['crew_id'] ?: '', 'dependencyIds' => is_array($dependencies) ? $dependencies : [], 'notes' => $row['notes'] ?: '',
+          'blockReason' => $row['block_reason'] ?: '', 'comments' => is_array($comments) ? $comments : [], 'attachments' => is_array($attachments) ? $attachments : [],
+          'createdAt' => crm_db_datetime($row['created_at'], true), 'updatedAt' => crm_db_datetime($row['updated_at'], true)];
+    }, $db->query('SELECT * FROM crm_construction_stages ORDER BY planned_start, created_at')->fetchAll());
     $leads = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'siteId' => $row['site_id'], 'status' => $row['status'] === 'in_progress' ? 'working' : $row['status'],
         'ownerId' => $row['owner_employee_id'] ?: '', 'nextAction' => $row['next_action'], 'dueAt' => crm_db_datetime($row['next_action_at']),
@@ -270,7 +291,7 @@ function crm_public_workspace(): array {
     ], $db->query('SELECT id, site_id, task_id, activity_type, body, author_employee_id, occurred_at FROM crm_communications ORDER BY occurred_at DESC')->fetchAll());
     $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
     return [
-        'clients' => $clients, 'sites' => $sites, 'leads' => $leads, 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities,
+        'clients' => $clients, 'sites' => $sites, 'leads' => $leads, 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages,
         'workspaceRevision' => (int)($settings['workspace_revision'] ?? 0), 'workspaceInitialized' => ($settings['workspace_initialized'] ?? '0') === '1',
     ];
 }
@@ -416,7 +437,8 @@ function crm_workspace_for_user(array $user): array {
     $clientIds = array_fill_keys(array_column($sites, 'clientId'), true);
     $clients = array_values(array_map(static fn(array $client): array => array_merge($client, ['phone' => '', 'email' => '']), array_filter($workspace['clients'], static fn(array $client): bool => isset($clientIds[$client['id']]))));
     $activities = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])));
-    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities]);
+    $constructionStages = array_values(array_filter($workspace['constructionStages'], static fn(array $stage): bool => isset($siteIds[$stage['siteId']])));
+    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages]);
 }
 
 function crm_sql_datetime(mixed $value): ?string {
@@ -442,6 +464,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
     $orders = crm_workspace_rows($workspace['orders'] ?? null, 'заказы', 30000);
     $tasks = crm_workspace_rows($workspace['tasks'] ?? null, 'задачи', 50000);
     $activities = crm_workspace_rows($workspace['activities'] ?? null, 'история', 100000);
+    $constructionStages = crm_workspace_rows($workspace['constructionStages'] ?? [], 'этапы строительства', 50000);
     $db->beginTransaction();
     try {
         $lock = $db->prepare("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized') FOR UPDATE");
@@ -470,16 +493,31 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $db->exec('DELETE FROM crm_tasks');
         $db->exec('DELETE FROM crm_orders');
         $db->exec('DELETE FROM crm_leads');
+        $db->exec('DELETE FROM crm_construction_stages');
         $db->exec('DELETE FROM crm_sites');
         $db->exec('DELETE FROM crm_clients');
         $insertClient = $db->prepare('INSERT INTO crm_clients (id, display_name, phone, email, source, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($clients as $row) $insertClient->execute([
             crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), '', '', (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
         ]);
-        $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, created_at) VALUES (?, ?, ?, ?, ?)');
+        $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($sites as $row) $insertSite->execute([
-            crm_required_text($row['id'] ?? '', 'идентификатор объекта', 36), crm_required_text($row['clientId'] ?? '', 'клиент объекта', 36), crm_required_text($row['name'] ?? '', 'объект', 220), crm_text($row['address'] ?? '', 500), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
+            crm_required_text($row['id'] ?? '', 'идентификатор объекта', 36), crm_required_text($row['clientId'] ?? '', 'клиент объекта', 36), crm_required_text($row['name'] ?? '', 'объект', 220), crm_text($row['address'] ?? '', 500),
+            in_array($row['status'] ?? '', ['planning','active','paused','complete'], true) ? $row['status'] : 'planning', isset($employeeIds[crm_text($row['managerId'] ?? '', 36)]) ? crm_text($row['managerId'], 36) : null,
+            crm_text($row['contractNumber'] ?? '', 120), ($row['plannedStart'] ?? '') !== '' ? crm_date($row['plannedStart']) : null, ($row['plannedFinish'] ?? '') !== '' ? crm_date($row['plannedFinish']) : null,
+            ($row['actualStart'] ?? '') !== '' ? crm_date($row['actualStart']) : null, ($row['actualFinish'] ?? '') !== '' ? crm_date($row['actualFinish']) : null, crm_text($row['notes'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
         ]);
+        $siteIds = array_fill_keys(array_column($sites, 'id'), true); $crewIds = array_fill_keys($db->query('SELECT id FROM crm_crews')->fetchAll(PDO::FETCH_COLUMN), true);
+        $insertStage = $db->prepare('INSERT INTO crm_construction_stages (id, site_id, title, stage_group, stage_status, progress, planned_start, planned_finish, actual_start, actual_finish, assignee_id, crew_id, dependency_ids_json, notes, block_reason, comments_json, attachments_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        foreach ($constructionStages as $row) {
+            $siteId = crm_required_text($row['siteId'] ?? '', 'объект этапа', 36); if (!isset($siteIds[$siteId])) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект этапа не найден.'], 422);
+            $status = in_array($row['status'] ?? '', ['planned','ready','doing','blocked','review','done'], true) ? $row['status'] : 'planned'; $progress = (int)($row['progress'] ?? 0); if ($progress < 0 || $progress > 100) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте готовность этапа.'], 422);
+            $assignee = crm_text($row['assigneeId'] ?? '', 36); $crew = crm_text($row['crewId'] ?? '', 36);
+            $insertStage->execute([crm_required_text($row['id'] ?? '', 'идентификатор этапа', 36), $siteId, crm_required_text($row['title'] ?? '', 'название этапа', 250), crm_required_text($row['group'] ?? '', 'раздел этапа', 120), $status, $progress,
+              ($row['plannedStart'] ?? '') !== '' ? crm_date($row['plannedStart']) : null, ($row['plannedFinish'] ?? '') !== '' ? crm_date($row['plannedFinish']) : null, ($row['actualStart'] ?? '') !== '' ? crm_date($row['actualStart']) : null, ($row['actualFinish'] ?? '') !== '' ? crm_date($row['actualFinish']) : null,
+              isset($employeeIds[$assignee]) ? $assignee : null, isset($crewIds[$crew]) ? $crew : null, json_encode(is_array($row['dependencyIds'] ?? null) ? $row['dependencyIds'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_text($row['notes'] ?? '', 10000), crm_text($row['blockReason'] ?? '', 10000),
+              json_encode(is_array($row['comments'] ?? null) ? $row['comments'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), json_encode(is_array($row['attachments'] ?? null) ? $row['attachments'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), crm_sql_datetime($row['updatedAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+        }
         $insertLead = $db->prepare('INSERT INTO crm_leads (id, site_id, public_number, status, owner_id, owner_employee_id, next_action, next_action_at, source, notes, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)');
         foreach ($leads as $index => $row) {
             $status = (string)($row['status'] ?? 'new'); if ($status === 'working') $status = 'in_progress';

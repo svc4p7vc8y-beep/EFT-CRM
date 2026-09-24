@@ -30,12 +30,13 @@ jobs:
         run: npm run build
       - name: Prepare deployment package
         run: |
-          mkdir -p release/api release/uploads/employees
+          mkdir -p release/api release/uploads/employees release/uploads/construction
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
           cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/install.php server/beget-api/schema.sql release/api/
           cp server/beget-api/.htaccess.example release/api/.htaccess
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess
+          cp server/uploads/construction/.htaccess release/uploads/construction/.htaccess
       - name: Validate deployment secrets
         env:
           BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}

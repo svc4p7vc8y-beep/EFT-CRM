@@ -59,3 +59,21 @@ test('перенос задачи сохраняет исходный срок �
   assert.equal(task.originalDueAt, original); assert.equal(task.dueAt, '2026-10-03T11:30'); assert.equal(task.rescheduleHistory.length, 2);
   assert.equal(task.rescheduleHistory[0].from, '2026-10-01T11:30'); validateState(state);
 });
+test('типовой план строительства создаёт 18 последовательных этапов', () => {
+  const original = createDemoState();
+  const state = applyCommand(original, 'construction.plan.initialize', { siteId: 'site-2', startDate: '2026-10-01' });
+  const stages = state.constructionStages.filter((stage) => stage.siteId === 'site-2');
+  assert.equal(stages.length, 18); assert.equal(stages[0].status, 'ready'); assert.deepEqual(stages[1].dependencyIds, [stages[0].id]);
+  assert.equal(state.sites.find((site) => site.id === 'site-2').plannedStart, '2026-10-01');
+  assert.throws(() => applyCommand(state, 'construction.plan.initialize', { siteId: 'site-2' }), /уже создан/);
+});
+test('этап строительства проверяет задержку, прогресс и связи', () => {
+  let state = applyCommand(createDemoState(), 'construction.plan.initialize', { siteId: 'site-2', startDate: '2026-10-01' });
+  const stage = state.constructionStages.find((item) => item.siteId === 'site-2');
+  assert.throws(() => applyCommand(state, 'construction.stage.save', { id: stage.id, status: 'blocked', blockReason: '' }), /Причина задержки/);
+  state = applyCommand(state, 'construction.stage.save', { id: stage.id, status: 'doing', progress: 35, assigneeId: 'worker-1' });
+  assert.equal(state.constructionStages.find((item) => item.id === stage.id).progress, 35);
+  state = applyCommand(state, 'construction.stage.comment', { id: stage.id, text: 'Завезён материал' });
+  assert.equal(state.constructionStages.find((item) => item.id === stage.id).comments[0].text, 'Завезён материал');
+  assert.throws(() => applyCommand(state, 'construction.stage.save', { id: stage.id, dependencyIds: [stage.id] }), /зависимости/);
+});

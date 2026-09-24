@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS crm_sites (
   client_id CHAR(36) NOT NULL,
   name VARCHAR(220) NOT NULL,
   address VARCHAR(500) NOT NULL DEFAULT '',
+  construction_status ENUM('planning','active','paused','complete') NOT NULL DEFAULT 'planning',
+  manager_employee_id CHAR(36) NULL,
+  contract_number VARCHAR(120) NOT NULL DEFAULT '',
+  planned_start DATE NULL,
+  planned_finish DATE NULL,
+  actual_start DATE NULL,
+  actual_finish DATE NULL,
+  construction_notes TEXT NULL,
   calculator_project_id CHAR(36) NULL,
   calculator_project_number VARCHAR(32) NOT NULL DEFAULT '',
   calculator_revision INT UNSIGNED NULL,
@@ -89,6 +97,32 @@ CREATE TABLE IF NOT EXISTS crm_sites (
   KEY idx_crm_sites_client (client_id, updated_at),
   UNIQUE KEY uq_crm_sites_calculator_project (calculator_project_id),
   CONSTRAINT fk_crm_sites_client FOREIGN KEY (client_id) REFERENCES crm_clients(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_construction_stages (
+  id CHAR(36) NOT NULL,
+  site_id CHAR(36) NOT NULL,
+  title VARCHAR(250) NOT NULL,
+  stage_group VARCHAR(120) NOT NULL DEFAULT '',
+  stage_status ENUM('planned','ready','doing','blocked','review','done') NOT NULL DEFAULT 'planned',
+  progress TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  planned_start DATE NULL,
+  planned_finish DATE NULL,
+  actual_start DATE NULL,
+  actual_finish DATE NULL,
+  assignee_id CHAR(36) NULL,
+  crew_id CHAR(36) NULL,
+  dependency_ids_json JSON NULL,
+  notes TEXT NULL,
+  block_reason TEXT NULL,
+  comments_json JSON NULL,
+  attachments_json JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_construction_site (site_id, planned_start),
+  KEY idx_crm_construction_status (stage_status, planned_finish),
+  CONSTRAINT fk_crm_construction_site FOREIGN KEY (site_id) REFERENCES crm_sites(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS crm_leads (
