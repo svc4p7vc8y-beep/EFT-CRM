@@ -71,6 +71,12 @@ test('потребность снабжения хранит несколько 
   s=applyCommand(s,'need.save',{...s.supplyNeeds[0],status:'rejected'});assert.equal(s.supplyNeeds[0].status,'rejected');validateState(s);
   assert.throws(()=>applyCommand(s,'need.save',{...need,id:'',links:['javascript:alert(1)']}),/http/);
 });
+test('ошибка во вложении клиента не блокирует независимую потребность снабжения',()=>{
+  const source=createDemoState();
+  source.attachments.push({id:'legacy-attachment',siteId:'missing'});
+  const state=applyCommand(source,'need.save',{name:'Циркулярная пила аккумуляторная',kind:'tool',destination:'production',quantity:1,unit:'шт',priority:'normal',status:'requested',neededBy:'',requestedBy:'',links:[],note:''});
+  assert.equal(state.supplyNeeds[0].name,'Циркулярная пила аккумуляторная');
+});
 test('логистика хранит рейс и проверяет связь заказа с объектом',()=>{
   const source=createDemoState();
   const state=applyCommand(source,'logistics.save',{siteId:'site-1',orderId:'order-1',plannedAt:'2026-10-15T09:00',deliveryWindow:'09:00–12:00',vehicle:'ГАЗель А123ВС',driverId:'worker-1',status:'in_transit',carrier:'ЭФТ',loadingAddress:'Производство',unloadingAddress:'Истра',note:'Домокомплект'});

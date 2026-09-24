@@ -16,7 +16,7 @@ import { ClientWorkspace } from '../features/ClientWorkspace.jsx';
 import { MyTasks } from '../features/MyTasks.jsx';
 import { Construction } from '../features/Construction.jsx';
 import { Logistics } from '../features/Logistics.jsx';
-import { RELEASE } from './operations.js';
+import { INVENTORY_ACTIONS, RELEASE } from './operations.js';
 import { employeeFromApi } from './api.js';
 import './app.css';
 import './operations.css';
@@ -31,7 +31,7 @@ const getRoute = () => { const hash = window.location.hash.slice(1); const clien
 const roleLabels = { owner: 'Владелец', admin: 'Администратор', finance: 'Финансы', manager: 'Менеджер', production: 'Производство', procurement: 'Закупки', foreman: 'Бригадир', employee: 'Сотрудник', viewer: 'Просмотр' };
 const initials = (name = '') => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'ЭФ';
 const coreServerActions = new Set(['lead.create','lead.update','client.update','activity.create','communication.send','communication.read','order.create','task.create','task.update','task.reschedule','task.check','construction.plan.initialize','construction.site.update','construction.stage.save','construction.stage.comment','logistics.save']);
-const inventoryServerActions = new Set(['material.save','supplier.save','need.save','purchase.create','stock.post','tool.save','tool.transfer']);
+const inventoryServerActions = INVENTORY_ACTIONS;
 
 export function App({ runtime = { mode: 'demo' } }) {
   const { state: localState, command, storageError, replace } = useWorkspace();

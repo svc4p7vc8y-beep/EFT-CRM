@@ -1,6 +1,7 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 37;
+export const RELEASE = 38;
+export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
   return { format: 'eft-price-catalog', appVersion: 144, priceMat: state.materials.map((m) => ({ id: m.id, kind: 'material', cat: m.category, name: m.name, unit: m.unit, price: m.price, ...(m.priceNote ? { priceNote: m.priceNote } : {}) })), priceLab: structuredClone(catalog.priceLab) };
@@ -197,4 +198,8 @@ export function validateOperations(state) {
     if (![item.name,item.kind,item.destination,item.unit,item.priority,item.status,item.neededBy,item.requestedBy,item.note,item.createdAt,item.updatedAt].every(str) || !['tool','consumable','equipment','other'].includes(item.kind) || !['production','tp'].includes(item.destination) || !['normal','high','urgent'].includes(item.priority) || !['requested','approved','ordered','received','rejected','cancelled'].includes(item.status) || !Array.isArray(item.links) || item.links.length > 10 || item.links.some((link) => !str(link) || !/^https?:\/\//i.test(link))) throw new Error('Некорректная потребность снабжения');
     num(item.quantity, 0.01, 1e6); if (item.neededBy) validDay(item.neededBy); if (Number.isNaN(Date.parse(item.createdAt)) || Number.isNaN(Date.parse(item.updatedAt))) throw new Error('Некорректная дата потребности');
   }
+}
+
+export function validateInventoryOperations(state) {
+  validateOperations({ ...state, attendance: [], taskTemplates: [], clientActions: [], attachments: [], logistics: [] });
 }

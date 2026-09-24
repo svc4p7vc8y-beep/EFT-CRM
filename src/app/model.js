@@ -1,4 +1,4 @@
-import { extendWorkspace, applyOperation, validateOperations } from './operations.js';
+import { extendWorkspace, applyOperation, INVENTORY_ACTIONS, validateInventoryOperations, validateOperations } from './operations.js';
 export const STORAGE_KEY = 'eft-crm.workspace.v1';
 export const EMPLOYEE_AVATARS = Array.from({ length: 15 }, (_, index) => `./avatars/employee-${String(index + 1).padStart(2, '0')}.jpg`);
 export const EMPLOYEES = [
@@ -215,7 +215,8 @@ export function applyCommand(current, action, payload = {}) {
     log(state, state.orders.find((v) => v.id === task.orderId)?.siteId || '', `Обновлён чек-лист: ${task.title}`, task.id);
   } else throw new Error('Неизвестное действие');
   state.revision += 1;
-  validateState(state);
+  if (INVENTORY_ACTIONS.has(action)) validateInventoryOperations(state);
+  else validateState(state);
   return state;
 }
 
