@@ -1,7 +1,7 @@
 {
   "name": "eft-crm",
   "private": true,
-  "version": "41.0.0",
+  "version": "42.0.0",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"

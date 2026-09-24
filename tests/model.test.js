@@ -37,8 +37,10 @@ test('серверная заявка может временно остават
   const state=createDemoState();state.leads[0].ownerId='';assert.doesNotThrow(()=>validateState(state));
 });
 test('общая задача может быть без исполнителя и срока', () => {
-  const state=applyCommand(createDemoState(),'task.create',{title:'Распределить новую задачу',description:'',orderId:'',siteId:'',assigneeId:'',dueAt:'',quantity:1,completedQty:0,unit:'задача',priority:'normal',status:'planned'});
+  let state=applyCommand(createDemoState(),'task.create',{title:'Распределить новую задачу',description:'',orderId:'',siteId:'',assigneeId:'',dueAt:'',quantity:1,completedQty:0,unit:'задача',priority:'normal',status:'planned'});
   assert.equal(state.tasks[0].assigneeId,'');assert.equal(state.tasks[0].dueAt,'');assert.doesNotThrow(()=>validateState(state));
+  state=applyCommand(state,'task.update',{id:state.tasks[0].id,assigneeId:'manager-1'});
+  assert.equal(state.tasks[0].assigneeId,'manager-1');
 });
 test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
   let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });
