@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, Search, ChevronDown, Home, ClipboardList, Users, MessageSquare, Factory, CheckSquare, CalendarDays, Package, HardHat, Truck, Database, Menu, X, CircleCheck, AlertCircle, Settings2, LogOut, ShieldCheck } from 'lucide-react';
 import { useWorkspace } from './useWorkspace.js';
-import { applyCommand, employee, isOverdue, leadContext } from './model.js';
+import { applyCommand, createDemoState, employee, isOverdue, leadContext } from './model.js';
 import { Dialog, VoiceInput } from '../components/UI.jsx';
 import { ThemeSwitcher } from '../components/ThemeSwitcher.jsx';
 import { ActivityForm, ClientForm, DataTools, LeadForm, OrderForm, TaskForm } from '../components/Forms.jsx';
@@ -42,9 +42,11 @@ export function App({ runtime = { mode: 'demo' } }) {
   const saveQueue = useRef(Promise.resolve());
   const inventorySaveQueue = useRef(Promise.resolve());
   const initializing = useRef(false);
+  const inventoryInitializing = useRef(false);
   const serverCore = serverOverride || runtime.serverData || {};
   const serverInventory = inventoryOverride || runtime.serverData || {};
-  const inventorySource = serverInventory.inventoryInitialized === false ? localState : serverInventory;
+  const localInventory = useMemo(() => localState.materials?.length ? localState : createDemoState(), [localState]);
+  const inventorySource = serverInventory.inventoryInitialized === false ? localInventory : serverInventory;
   const state = liveSession ? { ...localState, clients: serverCore.clients || [], sites: serverCore.sites || [], leads: serverCore.leads || [], orders: serverCore.orders || [], tasks: serverCore.tasks || [], activities: serverCore.activities || [], employees: (runtime.serverData?.employees || []).map(employeeFromApi), crews: runtime.serverData?.crews || [], attendance: runtime.serverData?.attendance || [], materials: inventorySource.materials || [], suppliers: inventorySource.suppliers || [], supplyNeeds: inventorySource.supplyNeeds || [], purchases: inventorySource.purchases || [], stockDocuments: inventorySource.stockDocuments || [], tools: inventorySource.tools || [], toolEvents: inventorySource.toolEvents || [] } : localState;
   const personnelState = state;
   const initialRoute = getRoute();
@@ -68,6 +70,17 @@ export function App({ runtime = { mode: 'demo' } }) {
       revisionRef.current = saved.workspaceRevision; setServerOverride(saved); setToast({ text: 'Данные этого устройства перенесены на сервер', error: false });
     }).catch((error) => setToast({ text: error.message, error: true }));
   }, [canSaveWorkspace, liveSession, localState, runtime]);
+  useEffect(() => {
+    if (!liveSession || !canSaveInventory || runtime.serverData?.inventoryInitialized !== false || inventoryInitializing.current || !runtime.saveInventory) return;
+    inventoryInitializing.current = true;
+    const initial = {
+      materials: localInventory.materials || [], suppliers: localInventory.suppliers || [], supplyNeeds: localInventory.supplyNeeds || [],
+      purchases: localInventory.purchases || [], stockDocuments: localInventory.stockDocuments || [], tools: localInventory.tools || [], toolEvents: localInventory.toolEvents || [],
+    };
+    runtime.saveInventory(initial, Number(runtime.serverData?.inventoryRevision || 0)).then((saved) => {
+      inventoryRevisionRef.current = saved.inventoryRevision; setInventoryOverride(saved); setToast({ text: 'Прайс, закупки и склад перенесены на сервер', error: false });
+    }).catch((error) => { inventoryInitializing.current = false; setToast({ text: error.message, error: true }); });
+  }, [canSaveInventory, liveSession, localInventory, runtime]);
   function navigate(id) { const item = navigation.find((v) => v.id === id); if (item?.planned) { setModal({ type: 'planned', id }); return; } setPage(id); setSearch(''); setSidebar(false); window.location.hash = id; }
   function mutate(action, payload, message = 'Сохранено') {
     if (!liveSession) { const next = command(action, payload); setToast({ text: message, error: false }); return next; }
