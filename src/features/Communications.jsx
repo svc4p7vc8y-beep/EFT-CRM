@@ -14,6 +14,8 @@ const channelName = (id) => CHANNELS.find((item) => item.id === id)?.label || (i
 const filesOf = (item) => (item.attachments || []).filter((file) => file?.key || file?.name);
 const UNASSIGNED = '__unassigned_email__';
 const senderOf = (item) => item.attachments?.find((entry) => entry?.kind === 'sender')?.email || '';
+const recipientOf = (item) => item.attachments?.find((entry) => entry?.kind === 'recipient')?.email || '';
+const correspondentOf = (item) => item.direction === 'outgoing' ? recipientOf(item) : senderOf(item);
 const mailCountLabel = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? 'письмо' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 'письма' : 'писем'}`;
 
 export function Communications({ state, search, command, runtime = { mode: 'demo' }, notify, onCreate, onLead }) {
@@ -30,8 +32,8 @@ export function Communications({ state, search, command, runtime = { mode: 'demo
     return state.sites.map((site) => { const client = state.clients.find((item) => item.id === site.clientId); const items = available.filter((item) => item.siteId === site.id).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)); const all = state.activities.filter((item)=>item.siteId===site.id&&(!channel||item.channel===channel)&&folderMatches(item)); return {site,client,last:items[0],unread:all.filter((item)=>!item.read).length}; })
       .filter((row)=>(mailFolder === 'all' || row.last) && `${row.client?.name} ${row.site.name} ${row.last?.text||''}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>new Date(b.last?.createdAt||0)-new Date(a.last?.createdAt||0));
   }, [channel, mailFolder, onlyUnread, search, state.activities, state.clients, state.sites]);
-  const unassigned = useMemo(() => state.activities.filter((item) => (!channel || channel === 'email') && mailFolder !== 'outgoing' && item.channel === 'email' && item.direction === 'incoming' && !item.siteId && (mailFolder === 'ignored' ? item.ignored : !item.ignored) && (!onlyUnread || mailFolder === 'ignored' || !item.read) && `${senderOf(item)} ${item.subject} ${item.text}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [channel, mailFolder, onlyUnread, search, state.activities]);
-  const unassignedGroups = useMemo(() => { const groups = new Map(); for (const item of unassigned) { const sender = senderOf(item).toLowerCase() || 'Адрес не указан'; if (!groups.has(sender)) groups.set(sender, { id: UNASSIGNED + sender, sender, messages: [], latest: item }); groups.get(sender).messages.push(item); } return [...groups.values()]; }, [unassigned]);
+  const unassigned = useMemo(() => state.activities.filter((item) => (!channel || channel === 'email') && item.channel === 'email' && ['incoming','outgoing'].includes(item.direction) && (mailFolder==='all'||mailFolder==='ignored'||(mailFolder==='incoming'&&item.direction==='incoming')||(mailFolder==='outgoing'&&item.direction==='outgoing')) && !item.siteId && (mailFolder === 'ignored' ? item.ignored : !item.ignored) && (!onlyUnread || mailFolder === 'ignored' || !item.read) && `${correspondentOf(item)} ${item.subject} ${item.text}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [channel, mailFolder, onlyUnread, search, state.activities]);
+  const unassignedGroups = useMemo(() => { const groups = new Map(); for (const item of unassigned) { const sender = correspondentOf(item).toLowerCase() || 'Адрес не указан'; if (!groups.has(sender)) groups.set(sender, { id: UNASSIGNED + sender, sender, messages: [], latest: item }); groups.get(sender).messages.push(item); } return [...groups.values()]; }, [unassigned]);
   const selectedGroup = unassignedOpen && (!channel || channel === 'email') && unassignedGroups.find((row) => row.id === selectedSite);
   const activeId = selectedGroup ? selectedGroup.id : selectedSite && conversations.some((row)=>row.site.id===selectedSite) ? selectedSite : (unassignedOpen ? unassignedGroups[0]?.id : '') || conversations[0]?.site.id || '';
   const inboxSelected = activeId.startsWith(UNASSIGNED); const activeGroup = unassignedGroups.find((row)=>row.id===activeId); const active = state.sites.find((item)=>item.id===activeId); const client = state.clients.find((item)=>item.id===active?.clientId); const lead = state.leads.find((item)=>item.siteId===activeId);
@@ -69,7 +71,7 @@ export function Communications({ state, search, command, runtime = { mode: 'demo
           const status=STATUS[item.deliveryStatus]||STATUS.saved; const StatusIcon=status[1];
           return <article key={item.id} className={`message-bubble ${item.direction}`}>
             <header><small>{channelName(item.channel)}{item.subject?` · ${item.subject}`:''}</small>{!inboxSelected?<button type="button" title="Ответить" onClick={()=>{setReplyTo(item);setSendChannel(['note','call'].includes(item.channel)?'email':item.channel);}}><Reply size={13}/></button>:null}</header>
-            {senderOf(item)?<small className="message-sender">От: {senderOf(item)}</small>:null}
+            {correspondentOf(item)?<small className="message-sender">{item.direction==='outgoing'?'Кому':'От'}: {correspondentOf(item)}</small>:null}
             <p>{item.text}</p>
             {filesOf(item).length?<div className="message-files">{filesOf(item).map((file,index)=><a key={file.key||`${file.name}-${index}`} href={file.url||'#'} download={file.name}><FileText size={14}/><span>{file.name}</span><Download size={12}/></a>)}</div>:null}
             {inboxSelected?<div className="mail-assignment">

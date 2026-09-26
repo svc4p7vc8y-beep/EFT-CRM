@@ -162,7 +162,45 @@ function crm_mail_sync(array $config): array {
             $insert->execute([crm_uuid(), $siteId, $key, $subject, $content, $metadata, $date]);
             if ($insert->rowCount() === 1) { $imported++; if ($siteId === null) $unassigned++; }
         }
+        $scanned = count($uids);
+        $prefix = '{' . $host . ':' . $port . '/imap/ssl/validate-cert}';
+        $sentMailbox = '';
+        foreach (imap_list($imap, $prefix, '*') ?: [] as $mailbox) {
+            $folder = mb_convert_encoding(substr($mailbox, strlen($prefix)), 'UTF-8', 'UTF7-IMAP');
+            if (preg_match('~(?:^|[/\\.])(?:sent(?: messages)?|отправленные)$~ui', $folder)) { $sentMailbox = $mailbox; break; }
+        }
+        if ($sentMailbox !== '') {
+            if (!@imap_reopen($imap, $sentMailbox, OP_READONLY)) throw new RuntimeException('Не удалось открыть папку отправленных писем.');
+            $sentUids = imap_search($imap, 'SINCE "' . $since . '"', SE_UID) ?: [];
+            rsort($sentUids, SORT_NUMERIC);
+            $sentUids = array_slice($sentUids, 0, 250);
+            $scanned += count($sentUids);
+            $insertSent = $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'email','email','outgoing',?,?,?,1,?,'sent','',?,NULL,NULL)");
+            foreach ($sentUids as $uid) {
+                $overview = imap_fetch_overview($imap, (string)$uid, FT_UID);
+                if (!$overview || !isset($overview[0])) continue;
+                $mail = $overview[0];
+                $messageId = trim((string)($mail->message_id ?? ''));
+                $key = 'imap-sent-' . hash('sha256', mb_strtolower($user) . '|' . ($messageId ?: (string)$uid));
+                $exists->execute([$key]); if ($exists->fetchColumn()) continue;
+                $to = imap_rfc822_parse_adrlist((string)($mail->to ?? ''), '');
+                $address = isset($to[0]->mailbox, $to[0]->host) ? mb_strtolower($to[0]->mailbox . '@' . $to[0]->host) : '';
+                if (!filter_var($address, FILTER_VALIDATE_EMAIL)) continue;
+                $sites->execute([$address]); $matches = $sites->fetchAll(PDO::FETCH_COLUMN);
+                $siteId = count($matches) === 1 ? (string)$matches[0] : null;
+                $structure = imap_fetchstructure($imap, $uid, FT_UID);
+                if (!$structure) continue;
+                [$plain, $html] = crm_mail_part_text($imap, $uid, $structure);
+                $content = trim($plain !== '' ? $plain : html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                $content = mb_substr($content !== '' ? $content : '[Письмо без текста]', 0, 20000);
+                $subject = mb_substr(crm_mail_decode_header((string)($mail->subject ?? '')), 0, 500);
+                $date = date('Y-m-d H:i:s', strtotime((string)($mail->date ?? 'now')) ?: time());
+                $metadata = json_encode([['kind' => 'recipient', 'email' => $address]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $insertSent->execute([crm_uuid(), $siteId, $key, $subject, $content, $metadata, $date]);
+                if ($insertSent->rowCount() === 1) { $imported++; if ($siteId === null) $unassigned++; }
+            }
+        }
         if ($imported) $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
     } finally { imap_close($imap); }
-    return ['imported' => $imported, 'unassigned' => $unassigned, 'scanned' => count($uids)];
+    return ['imported' => $imported, 'unassigned' => $unassigned, 'scanned' => $scanned];
 }

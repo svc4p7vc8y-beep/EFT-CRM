@@ -402,7 +402,7 @@ if ($action === 'communications.assign' && $method === 'POST') {
     $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
     $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
     if (!$site->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект клиента не найден.'], 422);
-    $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND direction='incoming'");
+    $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND is_ignored=0");
     $statement->execute([$siteId, $messageId]);
     if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо уже привязано или не найдено.'], 422);
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
@@ -415,7 +415,7 @@ if ($action === 'communications.ignore' && $method === 'POST') {
     $input = crm_input();
     $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
     $ignored = !empty($input['ignored']) ? 1 : 0;
-    $statement = crm_db()->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel='email' AND direction='incoming'");
+    $statement = crm_db()->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel='email'");
     $statement->execute([$ignored, $messageId]);
     if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо не найдено или его статус уже изменён.'], 422);
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
