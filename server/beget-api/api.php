@@ -357,16 +357,32 @@ if ($action === 'connectors.mail.configure' && $method === 'POST') {
         'smtp_host' => 'smtp.mail.ru', 'smtp_port' => 465, 'smtp_user' => $address, 'smtp_password' => $password,
         'imap_host' => 'imap.mail.ru', 'imap_port' => 993, 'imap_user' => $address, 'imap_password' => $password,
     ];
-    $path = __DIR__ . '/mail.local.php';
-    $temporary = tempnam(__DIR__, '.eft-mail-');
-    if ($temporary === false) throw new RuntimeException('Не удалось подготовить настройки почты.');
-    try {
-        if (file_put_contents($temporary, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($mail, true) . ";\n", LOCK_EX) === false || !chmod($temporary, 0600) || !rename($temporary, $path)) {
-            throw new RuntimeException('Не удалось сохранить настройки почты.');
-        }
-    } finally { if (is_file($temporary)) unlink($temporary); }
+    crm_store_private_integration('mail', $mail);
     crm_audit((int)$user['id'], 'connector.mail.configure', 'integration', 'mail', ['address' => $address]);
     crm_json(['ok' => true, 'connectors' => crm_connector_statuses()]);
+}
+
+if ($action === 'connectors.telegram.configure' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $input = crm_input(); $token = trim((string)($input['botToken'] ?? ''));
+    if (!preg_match('/^[0-9]{5,15}:[A-Za-z0-9_-]{30,100}$/', $token)) {
+        crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте токен Telegram-бота.'], 422);
+    }
+    try {
+        $reply = crm_http_json('https://api.telegram.org/bot' . $token . '/getMe', []);
+        $username = (string)($reply['result']['username'] ?? '');
+        if (empty($reply['ok']) || !preg_match('/^[A-Za-z0-9_]{5,32}$/', $username)) throw new RuntimeException('Bot identity unavailable');
+    } catch (Throwable $error) {
+        crm_json(['ok' => false, 'code' => 'bot_connection_failed', 'message' => 'Telegram не подтвердил токен бота. Проверьте его и повторите.'], 422);
+    }
+    $previous = crm_integration_config('telegram');
+    $sameBot = (string)($previous['bot_token'] ?? '') !== '' && hash_equals((string)$previous['bot_token'], $token);
+    crm_store_private_integration('telegram', [
+        'enabled' => true, 'bot_token' => $token, 'bot_username' => $username,
+        'site_chat_ids' => $sameBot && is_array($previous['site_chat_ids'] ?? null) ? $previous['site_chat_ids'] : [],
+    ]);
+    crm_audit((int)$user['id'], 'connector.telegram.configure', 'integration', 'telegram', ['username' => $username]);
+    crm_json(['ok' => true, 'username' => $username, 'connectors' => crm_connector_statuses()]);
 }
 
 if ($action === 'communications.mail.sync' && $method === 'POST') {

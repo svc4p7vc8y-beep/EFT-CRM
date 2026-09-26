@@ -622,9 +622,21 @@ function crm_require_capability(string $capability): array {
     return $user;
 }
 
+function crm_store_private_integration(string $channel, array $settings): void {
+    if (!in_array($channel, ['mail', 'telegram'], true)) throw new InvalidArgumentException('Unsupported integration');
+    $path = __DIR__ . '/' . $channel . '.local.php';
+    $temporary = tempnam(__DIR__, '.eft-' . $channel . '-');
+    if ($temporary === false) throw new RuntimeException('Не удалось подготовить настройки подключения.');
+    try {
+        if (file_put_contents($temporary, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($settings, true) . ";\n", LOCK_EX) === false || !chmod($temporary, 0600) || !rename($temporary, $path)) {
+            throw new RuntimeException('Не удалось сохранить настройки подключения.');
+        }
+    } finally { if (is_file($temporary)) unlink($temporary); }
+}
+
 function crm_integration_config(string $channel): array {
-    if ($channel === 'mail') {
-        $privateFile = __DIR__ . '/mail.local.php';
+    if (in_array($channel, ['mail', 'telegram'], true)) {
+        $privateFile = __DIR__ . '/' . $channel . '.local.php';
         if (is_file($privateFile)) {
             $private = require $privateFile;
             if (is_array($private)) return $private;
@@ -654,8 +666,9 @@ function crm_connector_statuses(): array {
             'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
             'max' => $enabled && (string)($config['bot_token'] ?? '') !== '',
         };
-        $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : 'Отправка настроена') : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
-        $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail];
+        $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : ($id === 'telegram' ? 'Бот' . ((string)($config['bot_username'] ?? '') !== '' ? ' @' . (string)$config['bot_username'] : '') . ' подключён' : 'Отправка настроена')) : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
+        $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail,
+            'linkedSiteIds' => $id === 'telegram' && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
     }
     return $result;
 }

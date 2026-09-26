@@ -1,6 +1,6 @@
 Options -Indexes
 
-<FilesMatch "^(config\.local\.php|mail\.local\.php|\.eft-mail-.*|config\.example\.php|schema\.sql|create-admin\.php)$">
+<FilesMatch "^(config\.local\.php|mail\.local\.php|telegram\.local\.php|\.eft-(mail|telegram)-.*|config\.example\.php|schema\.sql|create-admin\.php)$">
   Require all denied
 </FilesMatch>
 

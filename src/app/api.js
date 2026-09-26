@@ -87,6 +87,7 @@ export const crmApi = {
   },
   connectorStatuses: (signal) => request('connectors.status', { signal }),
   saveMailSettings: (address, appPassword) => request('connectors.mail.configure', { method: 'POST', body: { address, appPassword } }),
+  saveTelegramSettings: (botToken) => request('connectors.telegram.configure', { method: 'POST', body: { botToken } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
   sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {
