@@ -52,6 +52,12 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(bootstrap, /inventory_conflict/);
   assert.match(bootstrap, /httponly' => true/);
   assert.match(bootstrap, /samesite' => 'Lax'/);
+  assert.match(api, /communications\.send/);
+  assert.match(api, /connectors\.status/);
+  assert.match(api, /25\*1024\*1024/);
+  assert.match(bootstrap, /function crm_connector_statuses/);
+  assert.match(bootstrap, /function crm_dispatch_message/);
+  assert.match(schema, /delivery_status/);
 });
 
 test('автопубликация Beget не передаёт секретную конфигурацию', () => {
@@ -62,6 +68,7 @@ test('автопубликация Beget не передаёт секретну�
   assert.match(workflow, /VITE_CRM_API_URL: \/api\//);
   assert.match(workflow, /beget-api\/index\.php/);
   assert.match(workflow, /--exclude='api\/config\.local\.php'/);
+  assert.match(workflow, /uploads\/communications/);
   assert.match(workflow, /test -f '.+api\/config\.local\.php'/);
   assert.match(ignore, /server\/\*\*\/config\.local\.php/);
   assert.match(entrypoint, /require __DIR__ \. '\/api\.php'/);

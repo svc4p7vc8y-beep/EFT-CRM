@@ -7,7 +7,8 @@ import { ThemeSwitcher } from '../components/ThemeSwitcher.jsx';
 import { ActivityForm, ClientForm, DataTools, LeadForm, OrderForm, TaskForm } from '../components/Forms.jsx';
 import { Leads } from '../features/Leads.jsx';
 import { Production, TaskDetail } from '../features/Production.jsx';
-import { Clients, Communications, Overview } from '../features/WorkspacePages.jsx';
+import { Clients, Overview } from '../features/WorkspacePages.jsx';
+import { Communications } from '../features/Communications.jsx';
 import { StaffSettings, EmployeeForm, CrewForm } from '../features/StaffSettings.jsx';
 import { Calendar } from '../features/Calendar.jsx';
 import { Inventory } from '../features/Inventory.jsx';
@@ -127,6 +128,12 @@ export function App({ runtime = { mode: 'demo' } }) {
       const fresh = await runtime.uploadConstructionPhoto(stageId, file); revisionRef.current = Number(fresh.workspaceRevision || revisionRef.current); setServerOverride(fresh); setToast({ text: 'Фотография этапа загружена', error: false });
     } catch (error) { setToast({ text: error.message, error: true }); throw error; }
   }
+  async function sendCommunication(payload) {
+    if (!liveSession || !runtime.sendCommunication) return null;
+    const result = await runtime.sendCommunication(payload);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
   function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
@@ -158,7 +165,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
-      {page === 'communications' ? <Communications state={state} search={search} command={mutate} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
+      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'logistics' ? <Logistics state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}

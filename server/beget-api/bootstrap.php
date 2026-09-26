@@ -219,6 +219,8 @@ function crm_schema_ensure_v30(): void {
             'author_employee_id' => "CHAR(36) NULL AFTER author_id",
             'is_read' => "TINYINT(1) NOT NULL DEFAULT 1 AFTER body",
             'attachments_json' => "JSON NULL AFTER is_read",
+            'delivery_status' => "ENUM('internal','saved','queued','sent','delivered','error') NOT NULL DEFAULT 'saved' AFTER attachments_json",
+            'delivery_error' => "VARCHAR(1000) NOT NULL DEFAULT '' AFTER delivery_status",
         ],
         'crm_sites' => [
             'construction_status' => "ENUM('planning','active','paused','complete') NOT NULL DEFAULT 'planning' AFTER address",
@@ -300,7 +302,8 @@ function crm_public_workspace(): array {
           'channel' => $row['channel'], 'direction' => $row['direction'], 'subject' => $row['subject'] ?: '',
           'externalKey' => $row['external_key'] === $row['id'] ? '' : ($row['external_key'] ?: ''), 'text' => $row['body'],
           'authorId' => $row['author_employee_id'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
-          'read' => (bool)$row['is_read'], 'attachments' => is_array($attachments) ? $attachments : []];
+          'read' => (bool)$row['is_read'], 'attachments' => is_array($attachments) ? $attachments : [],
+          'deliveryStatus' => $row['delivery_status'] ?? ($row['direction'] === 'internal' ? 'internal' : 'saved'), 'deliveryError' => $row['delivery_error'] ?? ''];
     }, $db->query('SELECT * FROM crm_communications ORDER BY occurred_at DESC')->fetchAll());
     $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
     return [
@@ -569,7 +572,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             if ($quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
             $insertTask->execute([crm_required_text($row['id'] ?? '', 'идентификатор задачи', 36), $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
-        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, attachments_json, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, attachments_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {
             $type = in_array($row['type'] ?? '', ['note','call','meeting','email','message','system'], true) ? $row['type'] : 'note';
             $channel = in_array($row['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','system'], true) ? $row['channel'] : (in_array($type, ['note','call','email','system'], true) ? $type : 'note');
@@ -578,7 +581,8 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $activityId = crm_required_text($row['id'] ?? '', 'идентификатор записи', 36);
             $externalKey = crm_text($row['externalKey'] ?? '', 255) ?: $activityId;
             $attachments = is_array($row['attachments'] ?? null) ? $row['attachments'] : [];
-            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), (int)$user['id'], $author ?: null]);
+            $delivery = in_array($row['deliveryStatus'] ?? '', ['internal','saved','queued','sent','delivered','error'], true) ? $row['deliveryStatus'] : ($direction === 'internal' ? 'internal' : 'saved');
+            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), (int)$user['id'], $author ?: null]);
         }
         $nextRevision = $revision + 1;
         $db->prepare("UPDATE crm_settings SET setting_value = ? WHERE setting_key = 'workspace_revision'")->execute([(string)$nextRevision]);
@@ -614,6 +618,90 @@ function crm_require_capability(string $capability): array {
     $user = crm_user();
     if (!crm_can($user, $capability)) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав.'], 403);
     return $user;
+}
+
+function crm_integration_config(string $channel): array {
+    $all = crm_config()['integrations'] ?? [];
+    return is_array($all) && is_array($all[$channel] ?? null) ? $all[$channel] : [];
+}
+
+function crm_connector_statuses(): array {
+    $definitions = [
+        'email' => ['config' => 'mail', 'name' => 'Почта'],
+        'telegram' => ['config' => 'telegram', 'name' => 'Telegram'],
+        'whatsapp' => ['config' => 'whatsapp', 'name' => 'WhatsApp'],
+        'max' => ['config' => 'max', 'name' => 'MAX'],
+    ];
+    $result = [];
+    foreach ($definitions as $id => $definition) {
+        $config = crm_integration_config($definition['config']);
+        $enabled = !empty($config['enabled']);
+        $ready = match ($id) {
+            'email' => $enabled && (string)($config['from'] ?? '') !== '',
+            'telegram' => $enabled && (string)($config['bot_token'] ?? '') !== '',
+            'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
+            'max' => false,
+        };
+        $detail = $id === 'max' ? 'Ожидает доступ к Bot API' : ($ready ? 'Подключено на сервере' : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки'));
+        $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled && $id !== 'max' ? 'error' : 'pending'), 'detail' => $detail];
+    }
+    return $result;
+}
+
+function crm_http_json(string $url, array $payload, array $headers = []): array {
+    if (!function_exists('curl_init')) throw new RuntimeException('На сервере недоступен модуль cURL.');
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_HTTPHEADER => array_merge(['Content-Type: application/json'], $headers), CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)]);
+    $raw = curl_exec($curl); $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE); $error = curl_error($curl); curl_close($curl);
+    if ($raw === false || $error !== '') throw new RuntimeException('Канал не ответил: ' . $error);
+    $data = json_decode((string)$raw, true);
+    if ($status < 200 || $status >= 300) throw new RuntimeException((string)($data['error']['message'] ?? $data['description'] ?? 'Ошибка внешнего канала'));
+    return is_array($data) ? $data : [];
+}
+
+function crm_http_multipart(string $url, array $payload): array {
+    if (!function_exists('curl_init')) throw new RuntimeException('На сервере недоступен модуль cURL.');
+    $curl=curl_init($url); curl_setopt_array($curl,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>40,CURLOPT_POSTFIELDS=>$payload]);
+    $raw=curl_exec($curl);$status=(int)curl_getinfo($curl,CURLINFO_RESPONSE_CODE);$error=curl_error($curl);curl_close($curl);$data=json_decode((string)$raw,true);
+    if($raw===false||$error!==''||$status<200||$status>=300){$message=(string)($data['description']??$error);throw new RuntimeException($message!==''?$message:'Ошибка отправки файла');}
+    return is_array($data)?$data:[];
+}
+
+function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = []): array {
+    if (in_array($channel, ['note','call'], true)) return ['status' => 'internal', 'externalKey' => ''];
+    if ($channel === 'email') {
+        $config = crm_integration_config('mail');
+        if (empty($config['enabled']) || ($config['from'] ?? '') === '') return ['status' => 'saved', 'externalKey' => ''];
+        if ($recipientEmail === '') throw new RuntimeException('У клиента не указана электронная почта.');
+        $from = str_replace(["\r","\n"], '', (string)$config['from']); $sender = str_replace(["\r","\n"], '', (string)($config['sender_name'] ?? 'ЭФТ'));
+        $encodedSubject = '=?UTF-8?B?' . base64_encode($subject !== '' ? $subject : 'Сообщение от ЭФТ') . '?=';
+        $headers = "MIME-Version: 1.0\r\nFrom: {$sender} <{$from}>\r\nReply-To: {$from}"; $mailBody=$body;
+        if ($files) {
+            $boundary='eft-'.bin2hex(random_bytes(12));$headers.="\r\nContent-Type: multipart/mixed; boundary=\"{$boundary}\"";
+            $mailBody="--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$body}\r\n";
+            foreach($files as $file){$name=str_replace(["\r","\n",'"'],'',(string)$file['name']);$content=chunk_split(base64_encode((string)file_get_contents((string)$file['path'])));$mailBody.="--{$boundary}\r\nContent-Type: {$file['mime']}; name=\"{$name}\"\r\nContent-Disposition: attachment; filename=\"{$name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{$content}\r\n";}$mailBody.="--{$boundary}--\r\n";
+        } else $headers.="\r\nContent-Type: text/plain; charset=UTF-8";
+        if (!mail($recipientEmail, $encodedSubject, $mailBody, $headers)) throw new RuntimeException('Почтовый сервер не принял письмо.');
+        return ['status' => 'sent', 'externalKey' => 'mail-' . bin2hex(random_bytes(8))];
+    }
+    if ($channel === 'telegram') {
+        $config = crm_integration_config('telegram'); $token = (string)($config['bot_token'] ?? ''); $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : []; $chatId = (string)($map[$siteId] ?? '');
+        if (empty($config['enabled']) || $token === '') return ['status' => 'saved', 'externalKey' => ''];
+        if ($chatId === '') throw new RuntimeException('Для объекта не указан Telegram chat ID.');
+        if(!preg_match('/^\d+:[A-Za-z0-9_-]+$/',$token)) throw new RuntimeException('Некорректный токен Telegram.');
+        $result = crm_http_json('https://api.telegram.org/bot' . $token . '/sendMessage', ['chat_id' => $chatId, 'text' => $body]);
+        foreach($files as $file) crm_http_multipart('https://api.telegram.org/bot'.$token.'/sendDocument',['chat_id'=>$chatId,'document'=>new CURLFile((string)$file['path'],(string)$file['mime'],(string)$file['name'])]);
+        return ['status' => 'sent', 'externalKey' => 'tg-' . (string)($result['result']['message_id'] ?? '')];
+    }
+    if ($channel === 'whatsapp') {
+        $config = crm_integration_config('whatsapp'); $token = (string)($config['access_token'] ?? ''); $phoneId = (string)($config['phone_number_id'] ?? '');
+        if (empty($config['enabled']) || $token === '' || $phoneId === '') return ['status' => 'saved', 'externalKey' => ''];
+        $to = preg_replace('/\D+/', '', $recipientPhone); if ($to === '') throw new RuntimeException('У клиента не указан телефон для WhatsApp.');
+        $version = (string)($config['api_version'] ?? ''); if(!preg_match('/^v\d+\.\d+$/',$version)) throw new RuntimeException('Укажите актуальную версию WhatsApp Graph API.');
+        $result = crm_http_json("https://graph.facebook.com/{$version}/" . rawurlencode($phoneId) . '/messages', ['messaging_product' => 'whatsapp', 'recipient_type' => 'individual', 'to' => $to, 'type' => 'text', 'text' => ['preview_url' => false, 'body' => $body]], ['Authorization: Bearer ' . $token]);
+        return ['status' => 'sent', 'externalKey' => (string)($result['messages'][0]['id'] ?? '')];
+    }
+    return ['status' => 'saved', 'externalKey' => ''];
 }
 
 function crm_csrf(): void {

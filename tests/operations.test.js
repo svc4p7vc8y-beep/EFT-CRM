@@ -87,6 +87,7 @@ test('центр общения хранит канал, направление 
   let state=createDemoState();
   state=applyCommand(state,'communication.send',{siteId:'site-1',channel:'telegram',text:'Подтверждаем встречу',authorId:'manager-1'});
   assert.equal(state.activities[0].channel,'telegram');assert.equal(state.activities[0].direction,'outgoing');assert.equal(state.activities[0].read,true);
+  assert.equal(state.activities[0].deliveryStatus,'saved');
   const incoming=state.activities.find((item)=>item.siteId==='site-1'&&item.direction==='incoming');assert.equal(incoming.read,false);
   state=applyCommand(state,'communication.read',{siteId:'site-1',channel:'telegram'});assert.equal(state.activities.filter((item)=>item.siteId==='site-1'&&item.channel==='telegram').every((item)=>item.read),true);validateState(state);
   assert.throws(()=>applyCommand(state,'communication.send',{siteId:'missing',channel:'telegram',text:'Тест'}),/объект/);

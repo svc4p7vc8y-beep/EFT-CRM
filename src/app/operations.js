@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 42;
+export const RELEASE = 43;
 export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
@@ -60,7 +60,8 @@ export function applyOperation(state, action, payload) {
     if (!['note','call','email','telegram','whatsapp','max'].includes(payload.channel)) throw new Error('Выберите канал общения');
     const body = required(payload.text, 'сообщение').slice(0, 20000);
     const type = payload.channel === 'call' ? 'call' : payload.channel === 'email' ? 'email' : payload.channel === 'note' ? 'note' : 'message';
-    state.activities.unshift({ id: id(), siteId: payload.siteId, taskId: '', type, channel: payload.channel, direction: ['note','call'].includes(payload.channel) ? 'internal' : 'outgoing', subject: String(payload.subject || '').slice(0, 500), externalKey: '', text: body, authorId: String(payload.authorId || 'manager-1'), createdAt: new Date().toISOString(), read: true, attachments: [] });
+    const internal = ['note','call'].includes(payload.channel);
+    state.activities.unshift({ id: payload.id || id(), siteId: payload.siteId, taskId: '', type, channel: payload.channel, direction: internal ? 'internal' : 'outgoing', subject: String(payload.subject || '').slice(0, 500), externalKey: '', text: body, authorId: String(payload.authorId || 'manager-1'), createdAt: new Date().toISOString(), read: true, attachments: Array.isArray(payload.attachments) ? payload.attachments : [], deliveryStatus: internal ? 'internal' : 'saved', deliveryError: '' });
   } else if (action === 'communication.read') {
     if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Диалог не найден');
     for (const item of state.activities) if (item.siteId === payload.siteId && (!payload.channel || item.channel === payload.channel)) item.read = true;

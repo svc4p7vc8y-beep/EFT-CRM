@@ -85,6 +85,12 @@ export const crmApi = {
     body.append('photo', file);
     return request('employees.photo', { method: 'POST', body });
   },
+  connectorStatuses: (signal) => request('connectors.status', { signal }),
+  sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {
+    const body = new FormData(); body.append('siteId', siteId); body.append('channel', channel); body.append('subject', subject); body.append('text', text); body.append('replyTo', replyTo);
+    files.forEach((file) => body.append('files[]', file));
+    return request('communications.send', { method: 'POST', body });
+  },
   saveCrew: (crew) => request('crews.save', { method: crew.id ? 'PUT' : 'POST', body: crew }),
   saveUser: (user) => request('users.save', { method: user.id ? 'PUT' : 'POST', body: user }),
   unlockFinance: (pin) => request('finance.unlock', { method: 'POST', body: { pin } }),

@@ -369,6 +369,8 @@ CREATE TABLE IF NOT EXISTS crm_communications (
   body MEDIUMTEXT NOT NULL,
   is_read TINYINT(1) NOT NULL DEFAULT 1,
   attachments_json JSON NULL,
+  delivery_status ENUM('internal','saved','queued','sent','delivered','error') NOT NULL DEFAULT 'saved',
+  delivery_error VARCHAR(1000) NOT NULL DEFAULT '',
   occurred_at DATETIME NOT NULL,
   author_id BIGINT UNSIGNED NULL,
   author_employee_id CHAR(36) NULL,

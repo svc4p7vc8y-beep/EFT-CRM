@@ -11,4 +11,11 @@ return [
     'allowed_origins' => [
         'https://crm.eftsip.ru',
     ],
+    // Secrets stay only in config.local.php on the server. Never commit real values.
+    'integrations' => [
+        'mail' => ['enabled' => false, 'from' => '', 'sender_name' => 'ЭФТ'],
+        'telegram' => ['enabled' => false, 'bot_token' => '', 'site_chat_ids' => []],
+        'whatsapp' => ['enabled' => false, 'access_token' => '', 'phone_number_id' => '', 'api_version' => ''],
+        'max' => ['enabled' => false, 'bot_token' => '', 'site_chat_ids' => []],
+    ],
 ];

@@ -338,6 +338,60 @@ if ($action === 'construction.photo' && $method === 'POST') {
     crm_json(['ok' => true, 'attachment' => end($attachments)]);
 }
 
+if ($action === 'connectors.status' && $method === 'GET') {
+    $user = crm_user();
+    if (!crm_can($user, 'clients.view') && !crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав для просмотра подключений.'], 403);
+    crm_json(['ok' => true, 'connectors' => crm_connector_statuses()]);
+}
+
+if ($action === 'communications.send' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    if (!crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав для отправки сообщений.'], 403);
+    $siteId = crm_required_text($_POST['siteId'] ?? '', 'объект', 36);
+    $channel = in_array($_POST['channel'] ?? '', ['note','call','email','telegram','whatsapp','max'], true) ? (string)$_POST['channel'] : '';
+    if ($channel === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Выберите канал общения.'], 422);
+    $body = crm_required_text($_POST['text'] ?? '', 'сообщение', 20000); $subject = crm_text($_POST['subject'] ?? '', 500); $replyTo = crm_text($_POST['replyTo'] ?? '', 36);
+    $context = crm_db()->prepare('SELECT s.id, c.email, c.phone FROM crm_sites s JOIN crm_clients c ON c.id=s.client_id WHERE s.id=?'); $context->execute([$siteId]); $target = $context->fetch();
+    if (!$target) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Клиент или объект не найден.'], 422);
+    $files = $_FILES['files'] ?? null; $items = []; $dispatchFiles = [];
+    if (is_array($files) && is_array($files['name'] ?? null)) {
+        if (count($files['name']) > 8) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'К сообщению можно приложить не больше 8 файлов.'], 422);
+        $allowed = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx'];
+        $total = 0; $directory = dirname(__DIR__) . '/uploads/communications';
+        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Cannot create communication upload directory');
+        foreach ($files['name'] as $index => $originalName) {
+            if ((int)($files['error'][$index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Один из файлов не удалось загрузить.'], 422);
+            $size = (int)($files['size'][$index] ?? 0); $total += $size; if ($size < 1 || $size > 10*1024*1024 || $total > 25*1024*1024) crm_json(['ok' => false, 'code' => 'payload_too_large', 'message' => 'Один файл — до 10 МБ, все вложения — до 25 МБ.'], 413);
+            $temporary = (string)($files['tmp_name'][$index] ?? ''); if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary); if (!isset($allowed[$mime])) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены изображения, PDF, TXT, ZIP, DOCX и XLSX.'], 422);
+            $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $allowed[$mime]; if (!move_uploaded_file($temporary, $directory . '/' . $key)) throw new RuntimeException('Cannot store communication attachment');
+            $safeName=crm_text($originalName,220);$storedPath=$directory.'/'.$key;
+            $items[] = ['key'=>$key,'name'=>$safeName,'mime'=>$mime,'size'=>$size,'url'=>'/api/api.php?action=communications.file&key='.rawurlencode($key)];
+            $dispatchFiles[]=['path'=>$storedPath,'name'=>$safeName,'mime'=>$mime,'size'=>$size];
+        }
+    }
+    $id = crm_uuid(); $direction = in_array($channel, ['note','call'], true) ? 'internal' : 'outgoing'; $type = $channel === 'call' ? 'call' : ($channel === 'email' ? 'email' : ($channel === 'note' ? 'note' : 'message'));
+    $delivery = ['status' => $direction === 'internal' ? 'internal' : 'saved', 'externalKey' => '']; $deliveryError = '';
+    try { $delivery = crm_dispatch_message($channel, $siteId, (string)$target['email'], (string)$target['phone'], $subject, $body, $dispatchFiles); }
+    catch (Throwable $error) { $delivery = ['status'=>'error','externalKey'=>'']; $deliveryError = mb_substr($error->getMessage(),0,1000); }
+    $metadata = $items; if ($replyTo !== '') $metadata[] = ['kind'=>'reply','messageId'=>$replyTo];
+    $statement = crm_db()->prepare('INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,?,?,?,?,?,?,1,?,?,?,?,?,?)');
+    $statement->execute([$id,$siteId,$type,$channel,$direction,$delivery['externalKey'] ?: $id,$subject,$body,json_encode($metadata,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$delivery['status'],$deliveryError,date('Y-m-d H:i:s'),(int)$user['id'],$user['employeeId'] ?: null]);
+    crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_audit((int)$user['id'],'communication.send','communication',$id,['channel'=>$channel,'files'=>count($items),'status'=>$delivery['status']]);
+    crm_json(['ok'=>true,'messageId'=>$id,'deliveryStatus'=>$delivery['status'],'deliveryError'=>$deliveryError,'workspace'=>crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.file' && $method === 'GET') {
+    $user = crm_user(); $key = (string)($_GET['key'] ?? '');
+    if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx)$/',$key)) { http_response_code(404); exit; }
+    $statement = crm_db()->prepare('SELECT attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
+    $row = $statement->fetch(); if (!$row) { http_response_code(404); exit; }
+    $attachments = json_decode((string)$row['attachments_json'],true); $attachment = null; foreach (is_array($attachments)?$attachments:[] as $item) if (($item['key']??'')===$key) $attachment=$item;
+    if (!$attachment) { http_response_code(404); exit; } $path=dirname(__DIR__).'/uploads/communications/'.$key; if (!is_file($path)) { http_response_code(404); exit; }
+    header('Content-Type: '.(string)($attachment['mime']??'application/octet-stream')); header('Content-Length: '.filesize($path)); header("Content-Disposition: attachment; filename*=UTF-8''".rawurlencode((string)($attachment['name']??'file'))); header('X-Content-Type-Options: nosniff'); readfile($path); exit;
+}
+
 if ($action === 'attendance.list' && $method === 'GET') {
     $user = crm_user();
     $month = (string)($_GET['month'] ?? date('Y-m'));
