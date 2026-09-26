@@ -86,6 +86,7 @@ export const crmApi = {
     return request('employees.photo', { method: 'POST', body });
   },
   connectorStatuses: (signal) => request('connectors.status', { signal }),
+  saveMailSettings: (address, appPassword) => request('connectors.mail.configure', { method: 'POST', body: { address, appPassword } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
   sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {

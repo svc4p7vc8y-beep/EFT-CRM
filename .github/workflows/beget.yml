@@ -79,6 +79,7 @@ jobs:
         run: |
           rsync -az --checksum --omit-dir-times --no-perms --no-owner --no-group \
             --exclude='api/config.local.php' \
+            --exclude='api/mail.local.php' \
             -e "ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
       - name: Verify CRM API

@@ -344,6 +344,31 @@ if ($action === 'connectors.status' && $method === 'GET') {
     crm_json(['ok' => true, 'connectors' => crm_connector_statuses()]);
 }
 
+if ($action === 'connectors.mail.configure' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $input = crm_input();
+    $address = strtolower(crm_required_text($input['address'] ?? '', 'адрес почты', 190));
+    $password = (string)($input['appPassword'] ?? '');
+    if (!filter_var($address, FILTER_VALIDATE_EMAIL) || strlen($password) < 6 || strlen($password) > 200 || preg_match('/[\x00-\x1F\x7F]/', $password)) {
+        crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте адрес ящика и пароль приложения.'], 422);
+    }
+    $mail = [
+        'enabled' => true, 'from' => $address, 'sender_name' => 'ЭФТ',
+        'smtp_host' => 'smtp.mail.ru', 'smtp_port' => 465, 'smtp_user' => $address, 'smtp_password' => $password,
+        'imap_host' => 'imap.mail.ru', 'imap_port' => 993, 'imap_user' => $address, 'imap_password' => $password,
+    ];
+    $path = __DIR__ . '/mail.local.php';
+    $temporary = tempnam(__DIR__, '.eft-mail-');
+    if ($temporary === false) throw new RuntimeException('Не удалось подготовить настройки почты.');
+    try {
+        if (file_put_contents($temporary, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($mail, true) . ";\n", LOCK_EX) === false || !chmod($temporary, 0600) || !rename($temporary, $path)) {
+            throw new RuntimeException('Не удалось сохранить настройки почты.');
+        }
+    } finally { if (is_file($temporary)) unlink($temporary); }
+    crm_audit((int)$user['id'], 'connector.mail.configure', 'integration', 'mail', ['address' => $address]);
+    crm_json(['ok' => true, 'connectors' => crm_connector_statuses()]);
+}
+
 if ($action === 'communications.mail.sync' && $method === 'POST') {
     crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
     $config = crm_integration_config('mail');

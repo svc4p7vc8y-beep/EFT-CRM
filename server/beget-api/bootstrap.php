@@ -623,6 +623,13 @@ function crm_require_capability(string $capability): array {
 }
 
 function crm_integration_config(string $channel): array {
+    if ($channel === 'mail') {
+        $privateFile = __DIR__ . '/mail.local.php';
+        if (is_file($privateFile)) {
+            $private = require $privateFile;
+            if (is_array($private)) return $private;
+        }
+    }
     $all = crm_config()['integrations'] ?? [];
     return is_array($all) && is_array($all[$channel] ?? null) ? $all[$channel] : [];
 }
