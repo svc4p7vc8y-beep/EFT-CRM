@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
 import { Badge, Empty, Timeline, VoiceInput } from '../components/UI.jsx';
+import { CallLink } from '../components/CallLink.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
@@ -58,7 +59,7 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
     <button className="client-back" onClick={onBack}><ArrowLeft size={17} />Назад к списку</button>
     <header className="client-header">
       <div><div className="client-title-line"><h1>{client.name}</h1><Badge value={lead.status} stages={LEAD_STAGES} /></div><p>{site.name} · заявка от {dateLabel(lead.createdAt)}</p></div>
-      <div className="client-header-actions"><button className="button" onClick={onEditClient}>Контакты и объект</button><button className="button" onClick={onEditLead}>Редактировать заявку</button></div>
+      <div className="client-header-actions">{client.phone ? <CallLink phone={client.phone} label="Позвонить" className="button" /> : null}<button className="button" onClick={onEditClient}>Контакты и объект</button><button className="button" onClick={onEditLead}>Редактировать заявку</button></div>
     </header>
 
     <div className="client-progress" aria-label={`Прогресс заявки ${progress}%`}>
@@ -87,7 +88,7 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
       </div>
 
       <aside className="client-rail">
-        <section className="client-panel client-contacts"><div className="client-section-title"><div><UserRound size={19}/><h2>Клиент и объект</h2></div></div><dl><dt><Phone size={15}/>Телефон</dt><dd>{client.phone || 'Не указан'}</dd><dt><Mail size={15}/>Почта</dt><dd>{client.email || 'Не указана'}</dd><dt><MapPin size={15}/>Адрес</dt><dd>{site.address || 'Не указан'}</dd><dt>Источник</dt><dd>{lead.source}</dd><dt>Менеджер</dt><dd>{employee(lead.ownerId, state)?.name}</dd></dl>{lead.notes ? <div className="client-note"><strong>Примечание</strong><p>{lead.notes}</p></div> : null}</section>
+        <section className="client-panel client-contacts"><div className="client-section-title"><div><UserRound size={19}/><h2>Клиент и объект</h2></div></div><dl><dt><Phone size={15}/>Телефон</dt><dd><CallLink phone={client.phone} /></dd><dt><Mail size={15}/>Почта</dt><dd>{client.email || 'Не указана'}</dd><dt><MapPin size={15}/>Адрес</dt><dd>{site.address || 'Не указан'}</dd><dt>Источник</dt><dd>{lead.source}</dd><dt>Менеджер</dt><dd>{employee(lead.ownerId, state)?.name}</dd></dl>{lead.notes ? <div className="client-note"><strong>Примечание</strong><p>{lead.notes}</p></div> : null}</section>
         <section className="client-panel"><div className="client-section-title"><div><CheckCircle2 size={19}/><h2>Задачи и производство</h2></div><span>{tasks.length}</span></div>{tasks.length ? tasks.map((task) => <button className="client-task" key={task.id} onClick={() => onOpenTask(task.id)}><strong>{task.title}</strong><span>{employee(task.assigneeId, state)?.name || 'Не назначен'} · {dateLabel(task.dueAt)}</span><progress max="100" value={task.quantity ? task.completedQty / task.quantity * 100 : 0}/></button>) : <p className="muted small">Производственные задачи ещё не созданы.</p>}{orders.map((order) => <details className="order-spec" key={order.id}><summary>{order.number}</summary><p>{order.scope}</p></details>)}{!state.orders.some((order) => order.leadId === lead.id) ? <button className="button primary client-transfer" onClick={onTransfer}>Передать в производство</button> : null}</section>
       </aside>
     </div>

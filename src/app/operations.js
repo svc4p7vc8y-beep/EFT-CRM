@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 47;
+export const RELEASE = 48;
 export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {

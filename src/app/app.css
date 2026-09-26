@@ -39,3 +39,4 @@
 
 @media(max-width:1050px){.theme-switcher>summary span{display:none}.theme-switcher>summary{width:38px;justify-content:center;padding:0}.theme-menu{left:auto;right:0}}
 @media(max-width:760px){.theme-switcher{margin-left:auto}.theme-menu{position:fixed;top:58px;right:10px;left:auto;width:min(285px,calc(100vw - 20px))}}
+.call-link{display:inline-flex;align-items:center;gap:6px;max-width:100%;overflow-wrap:anywhere;text-decoration:none;font-weight:600}.call-link:hover{text-decoration:underline}.call-link svg{flex:none}.client-header-actions .button{color:var(--teal)}
