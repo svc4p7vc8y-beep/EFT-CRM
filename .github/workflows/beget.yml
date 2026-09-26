@@ -42,45 +42,44 @@ jobs:
         env:
           BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
           BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
-          BEGET_SSH_PASSWORD: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
+          BEGET_SSH_PRIVATE_KEY: ${{ secrets.CRM_BEGET_SSH_PRIVATE_KEY }}
           BEGET_SSH_KNOWN_HOSTS: ${{ secrets.CRM_BEGET_SSH_KNOWN_HOSTS }}
           BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
         run: |
           : "${BEGET_SSH_HOST:?Missing CRM_BEGET_SSH_HOST}"
           : "${BEGET_SSH_USER:?Missing CRM_BEGET_SSH_USER}"
-          : "${BEGET_SSH_PASSWORD:?Missing CRM_BEGET_SSH_PASSWORD}"
+          : "${BEGET_SSH_PRIVATE_KEY:?Missing CRM_BEGET_SSH_PRIVATE_KEY}"
           : "${BEGET_SSH_KNOWN_HOSTS:?Missing CRM_BEGET_SSH_KNOWN_HOSTS}"
           : "${BEGET_DEPLOY_PATH:?Missing CRM_BEGET_DEPLOY_PATH}"
           [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]
       - name: Configure SSH
         env:
           BEGET_SSH_KNOWN_HOSTS: ${{ secrets.CRM_BEGET_SSH_KNOWN_HOSTS }}
+          BEGET_SSH_PRIVATE_KEY: ${{ secrets.CRM_BEGET_SSH_PRIVATE_KEY }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$BEGET_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
-      - name: Install SFTP helper
-        run: sudo apt-get update && sudo apt-get install --yes sshpass
+          printf '%s\n' "$BEGET_SSH_PRIVATE_KEY" > ~/.ssh/beget_deploy
+          chmod 600 ~/.ssh/beget_deploy
       - name: Verify protected server configuration
         env:
           BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
           BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
-          SSHPASS: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
           BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
         run: |
-          sshpass -e ssh -p 22 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes \
+          ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
             "test -f '${BEGET_DEPLOY_PATH%/}/api/config.local.php' && test -f '${BEGET_DEPLOY_PATH%/}/api/.htaccess'"
       - name: Upload application
         env:
           BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
           BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
-          SSHPASS: ${{ secrets.CRM_BEGET_SSH_PASSWORD }}
           BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
         run: |
-          sshpass -e rsync -az --checksum --omit-dir-times --no-perms --no-owner --no-group \
+          rsync -az --checksum --omit-dir-times --no-perms --no-owner --no-group \
             --exclude='api/config.local.php' \
-            -e "ssh -p 22 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=yes" \
+            -e "ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
       - name: Verify CRM API
         run: curl --fail --silent --show-error --max-time 30 https://crm.eftsip.ru/api/?action=health | grep -q 'eft-crm-api'
