@@ -441,7 +441,11 @@ function crm_inventory_save(array $inventory, array $user, int $baseRevision): a
 
 function crm_workspace_for_user(array $user): array {
     $workspace = crm_public_workspace();
-    if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) return $workspace;
+    if (crm_can($user, 'integrations.manage')) return $workspace;
+    if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) {
+        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== ''));
+        return $workspace;
+    }
     $tasks = $workspace['tasks'];
     if (!crm_can($user, 'tasks.manage') && !crm_can($user, 'tasks.view')) {
         $employeeId = (string)($user['employeeId'] ?? '');
@@ -495,6 +499,10 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         if ($revision !== $baseRevision) {
             $db->rollBack();
             crm_json(['ok' => false, 'code' => 'workspace_conflict', 'message' => 'Данные уже изменил другой сотрудник. Рабочее пространство обновлено; повторите действие.'], 409);
+        }
+        if (!crm_can($user, 'integrations.manage')) {
+            $privateActivities = array_values(array_filter(crm_public_workspace()['activities'], static fn(array $activity): bool => $activity['siteId'] === ''));
+            $activities = array_merge(array_values(array_filter($activities, static fn(array $activity): bool => (string)($activity['siteId'] ?? '') !== '')), $privateActivities);
         }
         if ($initialize && !$initialized && (int)$db->query('SELECT COUNT(*) FROM crm_employees')->fetchColumn() === 0) {
             $insertEmployee = $db->prepare('INSERT INTO crm_employees (id, full_name, role_name, department, phone, email, avatar_key, attendance_mode, active, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');

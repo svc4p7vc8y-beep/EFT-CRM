@@ -106,7 +106,7 @@ if ($action === 'workspace.save' && $method === 'PUT') {
     $baseRevision = filter_var($input['baseRevision'] ?? null, FILTER_VALIDATE_INT);
     if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию данных. Обновите страницу.'], 422);
     $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']));
-    crm_json(array_merge(['ok' => true], $workspace));
+    crm_json(array_merge(['ok' => true], crm_workspace_for_user($user)));
 }
 
 if ($action === 'inventory.save' && $method === 'PUT') {
@@ -386,7 +386,7 @@ if ($action === 'connectors.telegram.configure' && $method === 'POST') {
 }
 
 if ($action === 'communications.mail.sync' && $method === 'POST') {
-    crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
     $config = crm_integration_config('mail');
     if (empty($config['enabled'])) crm_json(['ok' => false, 'code' => 'not_configured', 'message' => 'Сначала подключите почтовый ящик на сервере.'], 422);
     try { $summary = crm_mail_sync($config); }
@@ -396,7 +396,7 @@ if ($action === 'communications.mail.sync' && $method === 'POST') {
 }
 
 if ($action === 'communications.assign' && $method === 'POST') {
-    crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
     $input = crm_input();
     $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
     $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
