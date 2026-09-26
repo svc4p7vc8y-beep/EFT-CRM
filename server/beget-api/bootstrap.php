@@ -640,10 +640,10 @@ function crm_connector_statuses(): array {
             'email' => $enabled && (string)($config['from'] ?? '') !== '',
             'telegram' => $enabled && (string)($config['bot_token'] ?? '') !== '',
             'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
-            'max' => false,
+            'max' => $enabled && (string)($config['bot_token'] ?? '') !== '',
         };
-        $detail = $id === 'max' ? 'Ожидает доступ к Bot API' : ($ready ? 'Подключено на сервере' : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки'));
-        $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled && $id !== 'max' ? 'error' : 'pending'), 'detail' => $detail];
+        $detail = $ready ? 'Подключено на сервере' : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
+        $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail];
     }
     return $result;
 }
@@ -700,6 +700,13 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         $version = (string)($config['api_version'] ?? ''); if(!preg_match('/^v\d+\.\d+$/',$version)) throw new RuntimeException('Укажите актуальную версию WhatsApp Graph API.');
         $result = crm_http_json("https://graph.facebook.com/{$version}/" . rawurlencode($phoneId) . '/messages', ['messaging_product' => 'whatsapp', 'recipient_type' => 'individual', 'to' => $to, 'type' => 'text', 'text' => ['preview_url' => false, 'body' => $body]], ['Authorization: Bearer ' . $token]);
         return ['status' => 'sent', 'externalKey' => (string)($result['messages'][0]['id'] ?? '')];
+    }
+    if ($channel === 'max') {
+        $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=(string)($map[$siteId]??'');
+        if(empty($config['enabled'])||$token==='') return ['status'=>'saved','externalKey'=>''];
+        if($chatId===''||!preg_match('/^-?\d+$/',$chatId)) throw new RuntimeException('Для объекта не указан MAX chat ID.');
+        $last=[];foreach(mb_str_split($body,4000) as $part)$last=crm_http_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode($chatId),['text'=>$part,'notify'=>true],['Authorization: '.$token]);
+        return ['status'=>'sent','externalKey'=>'max-'.(string)($last['message']['body']['mid']??'')];
     }
     return ['status' => 'saved', 'externalKey' => ''];
 }
