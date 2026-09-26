@@ -131,6 +131,7 @@ export function AuthRoot() {
     saveTelegramSettings: async (botToken) => await crmApi.saveTelegramSettings(botToken),
     syncMail: async () => { const result = await crmApi.syncMail(); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     assignCommunication: async (messageId, siteId) => { const result = await crmApi.assignCommunication(messageId, siteId); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
+    ignoreCommunication: async (messageId, ignored) => { const result = await crmApi.ignoreCommunication(messageId, ignored); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     sendCommunication: async (payload) => { const result = await crmApi.sendCommunication(payload); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     saveUser: async (user) => { const result = await crmApi.saveUser(user); replaceUser(result.user); return result.user; },
     unlockFinance: async (pin) => { await crmApi.unlockFinance(pin); await refreshWorkspace(); },

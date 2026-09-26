@@ -90,6 +90,7 @@ export const crmApi = {
   saveTelegramSettings: (botToken) => request('connectors.telegram.configure', { method: 'POST', body: { botToken } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
+  ignoreCommunication: (messageId, ignored) => request('communications.ignore', { method: 'POST', body: { messageId, ignored } }),
   sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {
     const body = new FormData(); body.append('siteId', siteId); body.append('channel', channel); body.append('subject', subject); body.append('text', text); body.append('replyTo', replyTo);
     files.forEach((file) => body.append('files[]', file));

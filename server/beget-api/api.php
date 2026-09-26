@@ -410,6 +410,19 @@ if ($action === 'communications.assign' && $method === 'POST') {
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
 }
 
+if ($action === 'communications.ignore' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input();
+    $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
+    $ignored = !empty($input['ignored']) ? 1 : 0;
+    $statement = crm_db()->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel='email' AND direction='incoming'");
+    $statement->execute([$ignored, $messageId]);
+    if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо не найдено или его статус уже изменён.'], 422);
+    crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_audit((int)$user['id'], $ignored ? 'communication.ignore' : 'communication.restore', 'communication', $messageId);
+    crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
+}
+
 if ($action === 'communications.send' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
     if (!crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав для отправки сообщений.'], 403);

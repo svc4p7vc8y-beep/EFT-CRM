@@ -145,6 +145,11 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
+  async function ignoreCommunication(messageId, ignored) {
+    const result = await runtime.ignoreCommunication(messageId, ignored);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
   function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
@@ -176,7 +181,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
-      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canManageIntegrations && runtime.assignCommunication ? assignCommunication : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
+      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canManageIntegrations && runtime.assignCommunication ? assignCommunication : undefined, ignoreCommunication: canManageIntegrations && runtime.ignoreCommunication ? ignoreCommunication : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'logistics' ? <Logistics state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}

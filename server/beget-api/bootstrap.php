@@ -220,6 +220,7 @@ function crm_schema_ensure_v30(): void {
             'activity_type' => "VARCHAR(32) NOT NULL DEFAULT 'note' AFTER task_id",
             'author_employee_id' => "CHAR(36) NULL AFTER author_id",
             'is_read' => "TINYINT(1) NOT NULL DEFAULT 1 AFTER body",
+            'is_ignored' => "TINYINT(1) NOT NULL DEFAULT 0 AFTER is_read",
             'attachments_json' => "JSON NULL AFTER is_read",
             'delivery_status' => "ENUM('internal','saved','queued','sent','delivered','error') NOT NULL DEFAULT 'saved' AFTER attachments_json",
             'delivery_error' => "VARCHAR(1000) NOT NULL DEFAULT '' AFTER delivery_status",
@@ -304,7 +305,7 @@ function crm_public_workspace(): array {
           'channel' => $row['channel'], 'direction' => $row['direction'], 'subject' => $row['subject'] ?: '',
           'externalKey' => $row['external_key'] === $row['id'] ? '' : ($row['external_key'] ?: ''), 'text' => $row['body'],
           'authorId' => $row['author_employee_id'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
-          'read' => (bool)$row['is_read'], 'attachments' => is_array($attachments) ? $attachments : [],
+          'read' => (bool)$row['is_read'], 'ignored' => (bool)($row['is_ignored'] ?? false), 'attachments' => is_array($attachments) ? $attachments : [],
           'deliveryStatus' => $row['delivery_status'] ?? ($row['direction'] === 'internal' ? 'internal' : 'saved'), 'deliveryError' => $row['delivery_error'] ?? ''];
     }, $db->query('SELECT * FROM crm_communications ORDER BY occurred_at DESC')->fetchAll());
     $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -582,7 +583,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             if ($quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
             $insertTask->execute([crm_required_text($row['id'] ?? '', 'идентификатор задачи', 36), $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
-        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, attachments_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, is_ignored, attachments_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {
             $type = in_array($row['type'] ?? '', ['note','call','meeting','email','message','system'], true) ? $row['type'] : 'note';
             $channel = in_array($row['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','system'], true) ? $row['channel'] : (in_array($type, ['note','call','email','system'], true) ? $type : 'note');
@@ -592,7 +593,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $externalKey = crm_text($row['externalKey'] ?? '', 255) ?: $activityId;
             $attachments = is_array($row['attachments'] ?? null) ? $row['attachments'] : [];
             $delivery = in_array($row['deliveryStatus'] ?? '', ['internal','saved','queued','sent','delivered','error'], true) ? $row['deliveryStatus'] : ($direction === 'internal' ? 'internal' : 'saved');
-            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), (int)$user['id'], $author ?: null]);
+            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, !empty($row['ignored']) ? 1 : 0, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), (int)$user['id'], $author ?: null]);
         }
         $nextRevision = $revision + 1;
         $db->prepare("UPDATE crm_settings SET setting_value = ? WHERE setting_key = 'workspace_revision'")->execute([(string)$nextRevision]);
