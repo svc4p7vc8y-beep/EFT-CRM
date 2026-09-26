@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/mail.php';
+
 set_exception_handler(static function (Throwable $error): void {
     error_log('EFT CRM API error: ' . $error->getMessage());
     crm_json(['ok' => false, 'code' => 'server_error', 'message' => 'Внутренняя ошибка сервера.'], 500);
@@ -637,12 +639,15 @@ function crm_connector_statuses(): array {
         $config = crm_integration_config($definition['config']);
         $enabled = !empty($config['enabled']);
         $ready = match ($id) {
-            'email' => $enabled && (string)($config['from'] ?? '') !== '',
+            'email' => $enabled && filter_var((string)($config['from'] ?? ''), FILTER_VALIDATE_EMAIL) && (
+                (string)($config['smtp_host'] ?? '') === '' ||
+                ((string)($config['smtp_user'] ?? '') !== '' && (string)($config['smtp_password'] ?? '') !== '')
+            ),
             'telegram' => $enabled && (string)($config['bot_token'] ?? '') !== '',
             'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
             'max' => $enabled && (string)($config['bot_token'] ?? '') !== '',
         };
-        $detail = $ready ? 'Подключено на сервере' : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
+        $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : 'Отправка настроена') : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
         $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail];
     }
     return $result;
@@ -673,6 +678,10 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         $config = crm_integration_config('mail');
         if (empty($config['enabled']) || ($config['from'] ?? '') === '') return ['status' => 'saved', 'externalKey' => ''];
         if ($recipientEmail === '') throw new RuntimeException('У клиента не указана электронная почта.');
+        if ((string)($config['smtp_host'] ?? '') !== '') {
+            crm_mail_send_smtp($config, $recipientEmail, $subject, $body, $files);
+            return ['status' => 'sent', 'externalKey' => 'smtp-' . bin2hex(random_bytes(12))];
+        }
         $from = str_replace(["\r","\n"], '', (string)$config['from']); $sender = str_replace(["\r","\n"], '', (string)($config['sender_name'] ?? 'ЭФТ'));
         $encodedSubject = '=?UTF-8?B?' . base64_encode($subject !== '' ? $subject : 'Сообщение от ЭФТ') . '?=';
         $headers = "MIME-Version: 1.0\r\nFrom: {$sender} <{$from}>\r\nReply-To: {$from}"; $mailBody=$body;

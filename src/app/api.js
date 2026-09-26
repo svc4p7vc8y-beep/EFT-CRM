@@ -86,6 +86,8 @@ export const crmApi = {
     return request('employees.photo', { method: 'POST', body });
   },
   connectorStatuses: (signal) => request('connectors.status', { signal }),
+  syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
+  assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
   sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {
     const body = new FormData(); body.append('siteId', siteId); body.append('channel', channel); body.append('subject', subject); body.append('text', text); body.append('replyTo', replyTo);
     files.forEach((file) => body.append('files[]', file));

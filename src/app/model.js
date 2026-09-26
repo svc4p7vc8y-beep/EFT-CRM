@@ -76,6 +76,7 @@ export function createDemoState() {
     { id: 'activity-4', siteId: 'site-1', taskId: '', type: 'message', channel: 'telegram', direction: 'incoming', subject: '', text: 'Добрый день! Можно перенести встречу на пятницу после 15:00?', createdAt: dueAt(0, '09:18'), authorId: '', read: false },
     { id: 'activity-5', siteId: 'site-2', taskId: '', type: 'message', channel: 'whatsapp', direction: 'incoming', subject: '', text: 'Отправляю уточнение по расположению окон в гостиной.', createdAt: dueAt(-1, '18:42'), authorId: '', read: false },
     { id: 'activity-6', siteId: 'site-4', taskId: '', type: 'message', channel: 'max', direction: 'outgoing', subject: '', text: 'Бригада запланирована на согласованную дату. Напомним за день до выезда.', createdAt: dueAt(-2, '12:05'), authorId: 'manager-2', read: true },
+    { id: 'activity-7', siteId: '', taskId: '', type: 'email', channel: 'email', direction: 'incoming', subject: 'Вопрос по проекту дома', text: 'Добрый день! Хотелось бы уточнить сроки подготовки расчёта.', createdAt: dueAt(0, '11:30'), authorId: '', read: false, attachments: [{ kind: 'sender', email: 'new-client@example.invalid' }] },
   ];
   const employees = EMPLOYEES.map((person, index) => ({ ...person, avatar: EMPLOYEE_AVATARS[index], department: person.role === 'Цех' ? 'Производство' : 'Офис', phone: '', email: '', active: true, notes: '', attendanceMode: 'hours', payRate: 0, advanceAmount: 0 }));
   const crews = [
@@ -245,7 +246,7 @@ export function validateState(state) {
     if (task.originalDueAt) validDue(task.originalDueAt);
     for (const entry of task.rescheduleHistory) { if (entry.from) validDue(entry.from); validDue(entry.to); }
   }
-  if (state.activities.some((a) => (!has('sites', a.siteId) && !(a.taskId && state.tasks.some((t) => t.id === a.taskId && !t.orderId))) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || !['note','call','email','telegram','whatsapp','max','system'].includes(a.channel) || !['internal','incoming','outgoing'].includes(a.direction) || typeof a.read !== 'boolean' || !Array.isArray(a.attachments) || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
+  if (state.activities.some((a) => (!has('sites', a.siteId) && !(a.channel === 'email' && a.direction === 'incoming' && a.siteId === '') && !(a.taskId && state.tasks.some((t) => t.id === a.taskId && !t.orderId))) || (a.taskId && !has('tasks', a.taskId)) || !ACTIVITY_TYPES[a.type] || !['note','call','email','telegram','whatsapp','max','system'].includes(a.channel) || !['internal','incoming','outgoing'].includes(a.direction) || typeof a.read !== 'boolean' || !Array.isArray(a.attachments) || Number.isNaN(Date.parse(a.createdAt)))) throw new Error('Некорректная история событий');
   validateOperations(state);
   return state;
 }

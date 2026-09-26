@@ -127,6 +127,8 @@ export function AuthRoot() {
     },
     saveCrew: async (crew) => { const result = await crmApi.saveCrew(crew); replaceCrew(result.crew); return result.crew; },
     loadConnectorStatuses: async () => (await crmApi.connectorStatuses()).connectors,
+    syncMail: async () => { const result = await crmApi.syncMail(); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
+    assignCommunication: async (messageId, siteId) => { const result = await crmApi.assignCommunication(messageId, siteId); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     sendCommunication: async (payload) => { const result = await crmApi.sendCommunication(payload); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     saveUser: async (user) => { const result = await crmApi.saveUser(user); replaceUser(result.user); return result.user; },
     unlockFinance: async (pin) => { await crmApi.unlockFinance(pin); await refreshWorkspace(); },

@@ -344,6 +344,31 @@ if ($action === 'connectors.status' && $method === 'GET') {
     crm_json(['ok' => true, 'connectors' => crm_connector_statuses()]);
 }
 
+if ($action === 'communications.mail.sync' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $config = crm_integration_config('mail');
+    if (empty($config['enabled'])) crm_json(['ok' => false, 'code' => 'not_configured', 'message' => 'Сначала подключите почтовый ящик на сервере.'], 422);
+    try { $summary = crm_mail_sync($config); }
+    catch (Throwable $error) { crm_json(['ok' => false, 'code' => 'mail_sync_failed', 'message' => $error->getMessage()], 422); }
+    crm_audit((int)$user['id'], 'communication.mail.sync', 'integration', 'mail', $summary);
+    crm_json(['ok' => true, 'summary' => $summary, 'workspace' => crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.assign' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input();
+    $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
+    $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
+    $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+    if (!$site->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект клиента не найден.'], 422);
+    $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND direction='incoming'");
+    $statement->execute([$siteId, $messageId]);
+    if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо уже привязано или не найдено.'], 422);
+    crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_audit((int)$user['id'], 'communication.assign', 'communication', $messageId, ['siteId' => $siteId]);
+    crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
+}
+
 if ($action === 'communications.send' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
     if (!crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Недостаточно прав для отправки сообщений.'], 403);
@@ -353,6 +378,18 @@ if ($action === 'communications.send' && $method === 'POST') {
     $body = crm_required_text($_POST['text'] ?? '', 'сообщение', 20000); $subject = crm_text($_POST['subject'] ?? '', 500); $replyTo = crm_text($_POST['replyTo'] ?? '', 36);
     $context = crm_db()->prepare('SELECT s.id, c.email, c.phone FROM crm_sites s JOIN crm_clients c ON c.id=s.client_id WHERE s.id=?'); $context->execute([$siteId]); $target = $context->fetch();
     if (!$target) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Клиент или объект не найден.'], 422);
+    $recipientEmail = (string)$target['email'];
+    if ($channel === 'email' && $replyTo !== '') {
+        $previous = crm_db()->prepare("SELECT subject, attachments_json FROM crm_communications WHERE id=? AND site_id=? AND channel='email' AND direction='incoming'");
+        $previous->execute([$replyTo, $siteId]); $received = $previous->fetch();
+        if ($received) {
+            $metadata = json_decode((string)$received['attachments_json'], true);
+            foreach (is_array($metadata) ? $metadata : [] as $entry) {
+                if (($entry['kind'] ?? '') === 'sender' && filter_var((string)($entry['email'] ?? ''), FILTER_VALIDATE_EMAIL)) $recipientEmail = (string)$entry['email'];
+            }
+            if ($subject === '' && (string)$received['subject'] !== '') $subject = 'Re: ' . preg_replace('/^(Re:\s*)+/i', '', (string)$received['subject']);
+        }
+    }
     $files = $_FILES['files'] ?? null; $items = []; $dispatchFiles = [];
     if (is_array($files) && is_array($files['name'] ?? null)) {
         if (count($files['name']) > 8) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'К сообщению можно приложить не больше 8 файлов.'], 422);
@@ -372,7 +409,7 @@ if ($action === 'communications.send' && $method === 'POST') {
     }
     $id = crm_uuid(); $direction = in_array($channel, ['note','call'], true) ? 'internal' : 'outgoing'; $type = $channel === 'call' ? 'call' : ($channel === 'email' ? 'email' : ($channel === 'note' ? 'note' : 'message'));
     $delivery = ['status' => $direction === 'internal' ? 'internal' : 'saved', 'externalKey' => '']; $deliveryError = '';
-    try { $delivery = crm_dispatch_message($channel, $siteId, (string)$target['email'], (string)$target['phone'], $subject, $body, $dispatchFiles); }
+    try { $delivery = crm_dispatch_message($channel, $siteId, $recipientEmail, (string)$target['phone'], $subject, $body, $dispatchFiles); }
     catch (Throwable $error) { $delivery = ['status'=>'error','externalKey'=>'']; $deliveryError = mb_substr($error->getMessage(),0,1000); }
     $metadata = $items; if ($replyTo !== '') $metadata[] = ['kind'=>'reply','messageId'=>$replyTo];
     $statement = crm_db()->prepare('INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,?,?,?,?,?,?,1,?,?,?,?,?,?)');

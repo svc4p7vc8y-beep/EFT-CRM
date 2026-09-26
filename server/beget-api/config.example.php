@@ -13,7 +13,15 @@ return [
     ],
     // Secrets stay only in config.local.php on the server. Never commit real values.
     'integrations' => [
-        'mail' => ['enabled' => false, 'from' => '', 'sender_name' => 'ЭФТ'],
+        'mail' => [
+            'enabled' => false,
+            'from' => 'your-mailbox@example.com',
+            'sender_name' => 'ЭФТ',
+            'smtp_host' => 'smtp.mail.ru', 'smtp_port' => 465,
+            'smtp_user' => 'your-mailbox@example.com', 'smtp_password' => '',
+            'imap_host' => 'imap.mail.ru', 'imap_port' => 993,
+            'imap_user' => 'your-mailbox@example.com', 'imap_password' => '',
+        ],
         'telegram' => ['enabled' => false, 'bot_token' => '', 'site_chat_ids' => []],
         'whatsapp' => ['enabled' => false, 'access_token' => '', 'phone_number_id' => '', 'api_version' => ''],
         'max' => ['enabled' => false, 'bot_token' => '', 'site_chat_ids' => []],
