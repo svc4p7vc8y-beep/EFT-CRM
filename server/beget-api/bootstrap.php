@@ -256,7 +256,8 @@ function crm_public_workspace(): array {
     $db = crm_db();
     $clients = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'name' => $row['display_name'], 'phone' => $row['phone'], 'email' => $row['email'],
-    ], $db->query('SELECT id, display_name, phone, email FROM crm_clients ORDER BY created_at')->fetchAll());
+        'source' => $row['source'], 'notes' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true),
+    ], $db->query('SELECT id, display_name, phone, email, source, notes, created_at FROM crm_clients ORDER BY created_at')->fetchAll());
     $sites = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'clientId' => $row['client_id'], 'name' => $row['name'], 'address' => $row['address'],
         'status' => $row['construction_status'], 'managerId' => $row['manager_employee_id'] ?: '', 'contractNumber' => $row['contract_number'],
@@ -301,11 +302,14 @@ function crm_public_workspace(): array {
     ], $db->query('SELECT * FROM crm_logistics ORDER BY planned_at, created_at')->fetchAll());
     $activities = array_map(static function (array $row): array {
         $attachments = json_decode((string)($row['attachments_json'] ?? '[]'), true);
+        $workflow = [];
+        foreach (is_array($attachments) ? $attachments : [] as $entry) if (is_array($entry) && ($entry['kind'] ?? '') === 'workflow') $workflow = $entry;
         return ['id' => $row['id'], 'siteId' => $row['site_id'] ?: '', 'taskId' => $row['task_id'] ?: '', 'type' => $row['activity_type'],
           'channel' => $row['channel'], 'direction' => $row['direction'], 'subject' => $row['subject'] ?: '',
           'externalKey' => $row['external_key'] === $row['id'] ? '' : ($row['external_key'] ?: ''), 'text' => $row['body'],
           'authorId' => $row['author_employee_id'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
           'read' => (bool)$row['is_read'], 'ignored' => (bool)($row['is_ignored'] ?? false), 'attachments' => is_array($attachments) ? $attachments : [],
+          'workflowStatus' => (string)($workflow['status'] ?? ''), 'followUpAt' => (string)($workflow['followUpAt'] ?? ''),
           'deliveryStatus' => $row['delivery_status'] ?? ($row['direction'] === 'internal' ? 'internal' : 'saved'), 'deliveryError' => $row['delivery_error'] ?? ''];
     }, $db->query('SELECT * FROM crm_communications ORDER BY occurred_at DESC')->fetchAll());
     $settings = $db->query("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('workspace_revision','workspace_initialized')")->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -458,7 +462,7 @@ function crm_workspace_for_user(array $user): array {
     $siteIds = array_fill_keys(array_filter(array_column($orders, 'siteId')), true);
     $sites = array_values(array_filter($workspace['sites'], static fn(array $site): bool => isset($siteIds[$site['id']])));
     $clientIds = array_fill_keys(array_column($sites, 'clientId'), true);
-    $clients = array_values(array_map(static fn(array $client): array => array_merge($client, ['phone' => '', 'email' => '']), array_filter($workspace['clients'], static fn(array $client): bool => isset($clientIds[$client['id']]))));
+    $clients = array_values(array_map(static fn(array $client): array => array_merge($client, ['phone' => '', 'email' => '', 'source' => '', 'notes' => '']), array_filter($workspace['clients'], static fn(array $client): bool => isset($clientIds[$client['id']]))));
     $activities = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])));
     $constructionStages = array_values(array_filter($workspace['constructionStages'], static fn(array $stage): bool => isset($siteIds[$stage['siteId']])));
     $logistics = array_values(array_filter($workspace['logistics'], static fn(array $route): bool => isset($siteIds[$route['siteId']])));
@@ -528,7 +532,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $db->exec('DELETE FROM crm_clients');
         $insertClient = $db->prepare('INSERT INTO crm_clients (id, display_name, phone, email, source, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($clients as $row) $insertClient->execute([
-            crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), '', '', (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
+            crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), crm_text($row['source'] ?? '',120), crm_text($row['notes'] ?? '',10000), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
         ]);
         $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($sites as $row) $insertSite->execute([

@@ -48,6 +48,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const inventorySaveQueue = useRef(Promise.resolve());
   const initializing = useRef(false);
   const inventoryInitializing = useRef(false);
+  const seenCommunications = useRef(null);
   const serverCore = serverOverride || runtime.serverData || {};
   const serverInventory = inventoryOverride || runtime.serverData || {};
   const localInventory = useMemo(() => localState.materials?.length ? localState : createDemoState(), [localState]);
@@ -64,6 +65,15 @@ export function App({ runtime = { mode: 'demo' } }) {
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [page, selectedLead]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 4500); return () => clearTimeout(id); }, [toast]);
   useEffect(() => { const id=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(id); }, []);
+  useEffect(() => {
+    const incoming = state.activities.filter((item) => item.direction === 'incoming' && !item.ignored);
+    if (seenCommunications.current === null) { seenCommunications.current = new Set(incoming.map((item) => item.id)); return; }
+    const fresh = incoming.filter((item) => !seenCommunications.current.has(item.id));
+    incoming.forEach((item) => seenCommunications.current.add(item.id));
+    if (fresh.length && localStorage.getItem('eft-crm-browser-alerts') === 'on' && 'Notification' in window && Notification.permission === 'granted') {
+      for (const item of fresh.slice(0, 3)) new Notification('Новое сообщение в ЭФТ CRM', { body: `${item.subject || item.channel}: ${item.text.slice(0, 120)}` });
+    }
+  }, [state.activities]);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem(themeKey, theme); const color = theme === 'dark' ? '#101820' : theme === 'brand' ? '#282b27' : '#142b3b'; document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color); }, [theme, themeKey]);
   useEffect(() => { revisionRef.current = Number(runtime.serverData?.workspaceRevision || revisionRef.current); }, [runtime.serverData?.workspaceRevision]);
   useEffect(() => { inventoryRevisionRef.current = Number(runtime.serverData?.inventoryRevision || inventoryRevisionRef.current); }, [runtime.serverData?.inventoryRevision]);
@@ -150,6 +160,21 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
+  async function batchCommunications(messageIds, operation, siteId) {
+    const result = await runtime.batchCommunications(messageIds, operation, siteId);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
+  async function updateCommunicationWorkflow(messageId, status, followUpAt) {
+    const result = await runtime.updateCommunicationWorkflow(messageId, status, followUpAt);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
+  async function mergeClients(targetId, sourceId) {
+    const result = await runtime.mergeClients(targetId, sourceId);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
   function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
@@ -181,7 +206,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
-      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canManageIntegrations && runtime.assignCommunication ? assignCommunication : undefined, ignoreCommunication: canManageIntegrations && runtime.ignoreCommunication ? ignoreCommunication : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onLead={openLead} /> : null}
+      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canManageIntegrations && runtime.assignCommunication ? assignCommunication : undefined, ignoreCommunication: canManageIntegrations && runtime.ignoreCommunication ? ignoreCommunication : undefined, batchCommunications: canManageIntegrations && runtime.batchCommunications ? batchCommunications : undefined, updateCommunicationWorkflow: runtime.updateCommunicationWorkflow ? updateCommunicationWorkflow : undefined, saveCommunicationTemplates: canManageIntegrations ? runtime.saveCommunicationTemplates : undefined, saveCommunicationRules: canManageIntegrations ? runtime.saveCommunicationRules : undefined, createTelegramLink: canManageIntegrations ? runtime.createTelegramLink : undefined, mergeClients: runtime.mergeClients ? mergeClients : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onTask={(siteId, activity) => setModal({type:'task-new', siteId, title: activity?.subject || 'Ответить клиенту', description: activity ? `По письму: ${activity.text.slice(0, 500)}` : ''})} onLead={openLead} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'logistics' ? <Logistics state={state} command={mutate} search={search}/> : null}
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}

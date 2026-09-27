@@ -17,6 +17,48 @@ if ($action === 'health' && $method === 'GET') {
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
 }
 
+if ($action === 'connectors.telegram.webhook' && $method === 'POST') {
+    $config=crm_integration_config('telegram');
+    $expected=(string)($config['webhook_secret']??'');
+    $received=(string)($_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN']??'');
+    if ($expected==='' || !hash_equals($expected,$received)) crm_json(['ok'=>false],403);
+    $raw=file_get_contents('php://input');
+    if ($raw===false || strlen($raw)>1024*1024) crm_json(['ok'=>false],413);
+    $update=json_decode($raw,true); if (!is_array($update)) crm_json(['ok'=>false],422);
+    $message=$update['message']??null;
+    if (!is_array($message)) crm_json(['ok'=>true]);
+    $chatId=(string)($message['chat']['id']??'');
+    $text=trim((string)($message['text']??''));
+    if (!preg_match('/^-?\d{1,20}$/',$chatId) || $text==='') crm_json(['ok'=>true]);
+    if (preg_match('/^\/start(?:@[A-Za-z0-9_]+)?\s+([A-Za-z0-9_-]{20,64})$/',$text,$matches)) {
+        $links=is_array($config['pending_links']??null)?$config['pending_links']:[];
+        $token=$matches[1]; $link=$links[$token]??null;
+        if (is_array($link) && (int)($link['expires']??0)>=time()) {
+            $siteId=(string)($link['siteId']??'');
+            $site=crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+            if ($site->fetchColumn()) {
+                $map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];
+                $map[$siteId]=$chatId; $config['site_chat_ids']=$map;
+                unset($links[$token]); $config['pending_links']=$links;
+                crm_store_private_integration('telegram',$config);
+                try { crm_http_json('https://api.telegram.org/bot'.$config['bot_token'].'/sendMessage',['chat_id'=>$chatId,'text'=>'Чат подключён к ЭФТ. Теперь ваши сообщения появятся в CRM.']); } catch (Throwable $error) { error_log('EFT CRM Telegram welcome failed'); }
+            }
+        }
+        crm_json(['ok'=>true]);
+    }
+    $map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];
+    $siteId=array_search($chatId,$map,true);
+    if ($siteId===false) crm_json(['ok'=>true]);
+    crm_schema_ensure_v30();
+    $key='tg-update-'.(string)(int)($update['update_id']??0);
+    $sender=(string)($message['from']['first_name']??'Telegram');
+    $metadata=json_encode([['kind'=>'sender','name'=>mb_substr($sender,0,100)],['kind'=>'workflow','status'=>'reply','followUpAt'=>'']],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    $insert=crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','telegram','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
+    $insert->execute([crm_uuid(),$siteId,$key,mb_substr($text,0,20000),$metadata,date('Y-m-d H:i:s',(int)($message['date']??time()))]);
+    if ($insert->rowCount()) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_json(['ok'=>true]);
+}
+
 if ($action === 'login' && $method === 'POST') {
     crm_require_origin();
     crm_session_start();
@@ -107,6 +149,33 @@ if ($action === 'workspace.save' && $method === 'PUT') {
     if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию данных. Обновите страницу.'], 422);
     $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']));
     crm_json(array_merge(['ok' => true], crm_workspace_for_user($user)));
+}
+
+if ($action === 'clients.merge' && $method === 'POST') {
+    crm_require_origin(); $user=crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input=crm_input(); $targetId=crm_required_text($input['targetId']??'','основной клиент',36); $sourceId=crm_required_text($input['sourceId']??'','дубль клиента',36);
+    if ($targetId===$sourceId) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Выберите разных клиентов.'],422);
+    $db=crm_db(); $db->beginTransaction();
+    try {
+        $query=$db->prepare('SELECT id,display_name,email,phone,source,notes FROM crm_clients WHERE id IN (?,?) FOR UPDATE'); $query->execute([$targetId,$sourceId]);
+        $rows=[]; foreach ($query->fetchAll() as $row) $rows[$row['id']]=$row;
+        if (!isset($rows[$targetId],$rows[$sourceId])) throw new RuntimeException('Один из клиентов не найден.');
+        $email1=mb_strtolower(trim((string)$rows[$targetId]['email'])); $email2=mb_strtolower(trim((string)$rows[$sourceId]['email']));
+        if ($email1==='' || $email1!==$email2) throw new RuntimeException('Для объединения нужен одинаковый адрес электронной почты.');
+        $sourceNotes=trim((string)$rows[$sourceId]['notes']);
+        $mergedNotes=trim((string)$rows[$targetId]['notes'].($sourceNotes!==''?"\nОбъединено из «".$rows[$sourceId]['display_name']."»: ".$sourceNotes:''));
+        $db->prepare('UPDATE crm_clients SET phone=?, source=?, notes=? WHERE id=?')->execute([
+            (string)$rows[$targetId]['phone']!==''?$rows[$targetId]['phone']:$rows[$sourceId]['phone'],
+            (string)$rows[$targetId]['source']!==''?$rows[$targetId]['source']:$rows[$sourceId]['source'],
+            $mergedNotes,$targetId,
+        ]);
+        $db->prepare('UPDATE crm_sites SET client_id=? WHERE client_id=?')->execute([$targetId,$sourceId]);
+        $db->prepare('DELETE FROM crm_clients WHERE id=?')->execute([$sourceId]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        $db->commit();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); crm_json(['ok'=>false,'code'=>'merge_failed','message'=>$error->getMessage()],422); }
+    crm_audit((int)$user['id'],'client.merge','client',$targetId,['sourceId'=>$sourceId]);
+    crm_json(['ok'=>true,'workspace'=>crm_workspace_for_user($user)]);
 }
 
 if ($action === 'inventory.save' && $method === 'PUT') {
@@ -377,12 +446,33 @@ if ($action === 'connectors.telegram.configure' && $method === 'POST') {
     }
     $previous = crm_integration_config('telegram');
     $sameBot = (string)($previous['bot_token'] ?? '') !== '' && hash_equals((string)$previous['bot_token'], $token);
+    $secret=$sameBot && preg_match('/^[a-f0-9]{48}$/',(string)($previous['webhook_secret']??'')) ? (string)$previous['webhook_secret'] : bin2hex(random_bytes(24));
+    try { crm_http_json('https://api.telegram.org/bot'.$token.'/setWebhook', ['url'=>'https://crm.eftsip.ru/api/api.php?action=connectors.telegram.webhook','secret_token'=>$secret,'allowed_updates'=>['message']]); }
+    catch (Throwable $error) { crm_json(['ok'=>false,'code'=>'webhook_failed','message'=>'Telegram подтвердил бота, но не удалось настроить приём сообщений. Повторите подключение.'],422); }
     crm_store_private_integration('telegram', [
         'enabled' => true, 'bot_token' => $token, 'bot_username' => $username,
         'site_chat_ids' => $sameBot && is_array($previous['site_chat_ids'] ?? null) ? $previous['site_chat_ids'] : [],
+        'pending_links' => $sameBot && is_array($previous['pending_links'] ?? null) ? $previous['pending_links'] : [],
+        'webhook_secret' => $secret,
     ]);
     crm_audit((int)$user['id'], 'connector.telegram.configure', 'integration', 'telegram', ['username' => $username]);
     crm_json(['ok' => true, 'username' => $username, 'connectors' => crm_connector_statuses()]);
+}
+
+if ($action === 'connectors.telegram.link' && $method === 'POST') {
+    crm_require_origin(); $user=crm_require_capability('integrations.manage'); crm_csrf();
+    $input=crm_input(); $siteId=crm_required_text($input['siteId']??'','объект клиента',36);
+    $site=crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+    if (!$site->fetchColumn()) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Объект не найден.'],422);
+    $config=crm_integration_config('telegram'); $username=(string)($config['bot_username']??'');
+    if (empty($config['enabled']) || !preg_match('/^[A-Za-z0-9_]{5,32}$/',$username)) crm_json(['ok'=>false,'code'=>'not_configured','message'=>'Сначала подключите Telegram-бота.'],422);
+    $links=is_array($config['pending_links']??null)?$config['pending_links']:[];
+    $links=array_filter($links,static fn($link):bool => is_array($link) && (int)($link['expires']??0)>time());
+    $token=rtrim(strtr(base64_encode(random_bytes(24)),'+/','-_'),'=');
+    $links[$token]=['siteId'=>$siteId,'expires'=>time()+86400]; $config['pending_links']=$links;
+    crm_store_private_integration('telegram',$config);
+    crm_audit((int)$user['id'],'connector.telegram.link','site',$siteId);
+    crm_json(['ok'=>true,'url'=>'https://t.me/'.$username.'?start='.$token,'expiresAt'=>gmdate('c',time()+86400)]);
 }
 
 if ($action === 'communications.mail.sync' && $method === 'POST') {
@@ -421,6 +511,107 @@ if ($action === 'communications.ignore' && $method === 'POST') {
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
     crm_audit((int)$user['id'], $ignored ? 'communication.ignore' : 'communication.restore', 'communication', $messageId);
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.batch' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input();
+    $ids = array_values(array_unique(array_filter($input['messageIds'] ?? [], 'is_string')));
+    if (!$ids || count($ids) > 100 || array_filter($ids, static fn(string $id): bool => !preg_match('/^[a-f0-9-]{36}$/i', $id))) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Выберите от 1 до 100 писем.'],422);
+    $operation = (string)($input['operation'] ?? '');
+    if (!in_array($operation, ['assign','ignore','restore'], true)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Действие не поддерживается.'],422);
+    $siteId = '';
+    if ($operation === 'assign') {
+        $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
+        $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+        if (!$site->fetchColumn()) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Объект клиента не найден.'],422);
+    }
+    $db = crm_db(); $db->beginTransaction();
+    try {
+        $update = $operation === 'assign'
+            ? $db->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND is_ignored=0")
+            : $db->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel='email'");
+        $changed = 0;
+        foreach ($ids as $id) {
+            $update->execute($operation === 'assign' ? [$siteId,$id] : [$operation === 'ignore' ? 1 : 0,$id]);
+            $changed += $update->rowCount();
+        }
+        if ($changed) $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        $db->commit();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    crm_audit((int)$user['id'], 'communication.batch.'.$operation, 'communication', '', ['count'=>$changed,'siteId'=>$siteId]);
+    crm_json(['ok'=>true,'changed'=>$changed,'workspace'=>crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.workflow' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input(); $id = crm_required_text($input['messageId'] ?? '', 'сообщение', 36);
+    $status = (string)($input['status'] ?? '');
+    if (!in_array($status, ['', 'reply','waiting','working','closed'], true)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Статус не поддерживается.'],422);
+    $followUpAt = (string)($input['followUpAt'] ?? '');
+    $parsedDate=$followUpAt!==''?DateTimeImmutable::createFromFormat('!Y-m-d',$followUpAt):null;
+    if ($followUpAt !== '' && (!preg_match('/^\d{4}-\d{2}-\d{2}$/',$followUpAt) || !$parsedDate || $parsedDate->format('Y-m-d') !== $followUpAt)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Проверьте дату напоминания.'],422);
+    $check=crm_db()->prepare('SELECT site_id FROM crm_communications WHERE id=?'); $check->execute([$id]);
+    if (!$check->fetchColumn()) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Сначала привяжите сообщение к клиенту.'],422);
+    $db=crm_db(); $db->beginTransaction();
+    try {
+        $query=$db->prepare('SELECT site_id,attachments_json FROM crm_communications WHERE id=? FOR UPDATE'); $query->execute([$id]); $row=$query->fetch();
+        if (!$row || !$row['site_id']) throw new RuntimeException('Сообщение больше не привязано к клиенту.');
+        $attachments=json_decode((string)$row['attachments_json'],true); if (!is_array($attachments)) $attachments=[];
+        $attachments=array_values(array_filter($attachments,static fn($entry):bool => !is_array($entry) || ($entry['kind']??'')!=='workflow'));
+        if ($status !== '' || $followUpAt !== '') $attachments[]=['kind'=>'workflow','status'=>$status,'followUpAt'=>$followUpAt];
+        $db->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?')->execute([json_encode($attachments,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$id]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        $db->commit();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    crm_audit((int)$user['id'],'communication.workflow','communication',$id,['status'=>$status,'followUpAt'=>$followUpAt]);
+    crm_json(['ok'=>true,'workspace'=>crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.templates' && $method === 'GET') {
+    $user=crm_user(); if (!crm_can($user,'clients.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
+    $statement=crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key=?'); $statement->execute(['communication_templates']);
+    $raw=$statement->fetchColumn();
+    $defaults=[['id'=>'default-1','title'=>'Получили','text'=>'Спасибо, получили информацию.'],['id'=>'default-2','title'=>'Расчёт','text'=>'Подготовим расчёт и вернёмся с ответом.'],['id'=>'default-3','title'=>'Звонок','text'=>'Уточните, пожалуйста, удобное время для звонка.']];
+    $templates=$raw===false?$defaults:json_decode((string)$raw,true);
+    crm_json(['ok'=>true,'templates'=>is_array($templates)?$templates:$defaults]);
+}
+
+if ($action === 'communications.templates' && $method === 'POST') {
+    crm_require_origin(); $user=crm_require_capability('integrations.manage'); crm_csrf();
+    $input=crm_input(); $rows=$input['templates']??null;
+    if (!is_array($rows) || count($rows)>40) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Допускается не более 40 шаблонов.'],422);
+    $templates=[]; foreach ($rows as $row) {
+        if (!is_array($row)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Проверьте шаблон.'],422);
+        $templates[]=['id'=>crm_required_text($row['id']??'','идентификатор',36),'title'=>crm_required_text($row['title']??'','название',100),'text'=>crm_required_text($row['text']??'','текст',4000)];
+    }
+    crm_db()->prepare("INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES ('communication_templates',?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)")->execute([json_encode($templates,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$user['id']]);
+    crm_audit((int)$user['id'],'communication.templates.update','settings','communication_templates',['count'=>count($templates)]);
+    crm_json(['ok'=>true,'templates'=>$templates]);
+}
+
+if ($action === 'communications.rules' && $method === 'GET') {
+    $user=crm_require_capability('integrations.manage');
+    $statement=crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key=?'); $statement->execute(['communication_mail_rules']);
+    $rules=json_decode((string)($statement->fetchColumn() ?: '[]'),true);
+    crm_json(['ok'=>true,'rules'=>is_array($rules)?$rules:[]]);
+}
+
+if ($action === 'communications.rules' && $method === 'POST') {
+    crm_require_origin(); $user=crm_require_capability('integrations.manage'); crm_csrf();
+    $input=crm_input(); $rows=$input['rules']??null;
+    if (!is_array($rows) || count($rows)>30) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Допускается не более 30 правил.'],422);
+    $rules=[]; foreach ($rows as $row) {
+        if (!is_array($row)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Проверьте правило.'],422);
+        $field=(string)($row['field']??''); $operation=(string)($row['operation']??'');
+        if (!in_array($field,['sender','subject'],true) || !in_array($operation,['ignore','assign'],true)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Проверьте тип правила.'],422);
+        $siteId=crm_text($row['siteId']??'',36);
+        if ($operation==='assign') { $check=crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $check->execute([$siteId]); if (!$check->fetchColumn()) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Объект для правила не найден.'],422); }
+        $rules[]=['id'=>crm_required_text($row['id']??'','идентификатор',36),'field'=>$field,'contains'=>crm_required_text($row['contains']??'','фрагмент',100),'operation'=>$operation,'siteId'=>$operation==='assign'?$siteId:''];
+    }
+    crm_db()->prepare("INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES ('communication_mail_rules',?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)")->execute([json_encode($rules,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$user['id']]);
+    crm_audit((int)$user['id'],'communication.rules.update','settings','communication_mail_rules',['count'=>count($rules)]);
+    crm_json(['ok'=>true,'rules'=>$rules]);
 }
 
 if ($action === 'communications.send' && $method === 'POST') {
@@ -476,8 +667,10 @@ if ($action === 'communications.send' && $method === 'POST') {
 if ($action === 'communications.file' && $method === 'GET') {
     $user = crm_user(); $key = (string)($_GET['key'] ?? '');
     if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx)$/',$key)) { http_response_code(404); exit; }
-    $statement = crm_db()->prepare('SELECT attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
+    $statement = crm_db()->prepare('SELECT site_id,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
     $row = $statement->fetch(); if (!$row) { http_response_code(404); exit; }
+    if (!$row['site_id'] && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
+    if ($row['site_id'] && !crm_can($user,'clients.manage') && !crm_can($user,'clients.view') && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
     $attachments = json_decode((string)$row['attachments_json'],true); $attachment = null; foreach (is_array($attachments)?$attachments:[] as $item) if (($item['key']??'')===$key) $attachment=$item;
     if (!$attachment) { http_response_code(404); exit; } $path=dirname(__DIR__).'/uploads/communications/'.$key; if (!is_file($path)) { http_response_code(404); exit; }
     header('Content-Type: '.(string)($attachment['mime']??'application/octet-stream')); header('Content-Length: '.filesize($path)); header("Content-Disposition: attachment; filename*=UTF-8''".rawurlencode((string)($attachment['name']??'file'))); header('X-Content-Type-Options: nosniff'); readfile($path); exit;

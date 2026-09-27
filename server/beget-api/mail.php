@@ -115,6 +115,47 @@ function crm_mail_part_text($imap, int $uid, object $structure, string $section 
     return strtoupper((string)($structure->subtype ?? 'PLAIN')) === 'HTML' ? ['', $decoded] : [$decoded, ''];
 }
 
+function crm_mail_rule(string $sender, string $subject, array $rules): array {
+    foreach ($rules as $rule) {
+        if (!is_array($rule)) continue;
+        $field = ($rule['field'] ?? '') === 'subject' ? $subject : $sender;
+        $contains = trim((string)($rule['contains'] ?? ''));
+        if ($contains !== '' && mb_stripos($field, $contains) !== false) return $rule;
+    }
+    return [];
+}
+
+function crm_mail_store_attachments($imap, int $uid, object $structure, string $section = '', int &$count = 0, int &$total = 0): array {
+    $items=[];
+    if (!empty($structure->parts)) {
+        foreach ($structure->parts as $index=>$part) {
+            $partSection=$section===''?(string)($index+1):$section.'.'.($index+1);
+            foreach (crm_mail_store_attachments($imap,$uid,$part,$partSection,$count,$total) as $entry) $items[]=$entry;
+        }
+        return $items;
+    }
+    $name='';
+    foreach (array_merge((array)($structure->dparameters??[]),(array)($structure->parameters??[])) as $parameter) {
+        $attribute=strtolower((string)($parameter->attribute??''));
+        if (in_array($attribute,['filename','name'],true)) $name=crm_mail_decode_header((string)($parameter->value??''));
+    }
+    if ($name==='' || $count>=8 || (int)($structure->bytes??0)>15*1024*1024) return [];
+    $mime=strtolower(match ((int)($structure->type??-1)) { 0=>'text',1=>'multipart',2=>'message',3=>'application',5=>'image',default=>'unknown' }).'/'.strtolower((string)($structure->subtype??''));
+    $allowed=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx'];
+    if (!isset($allowed[$mime])) return [];
+    $raw=imap_fetchbody($imap,$uid,$section,FT_UID|FT_PEEK);
+    if (!is_string($raw)) return [];
+    $decoded=match ((int)($structure->encoding??0)) { 3=>base64_decode($raw,true),4=>quoted_printable_decode($raw),default=>$raw };
+    if (!is_string($decoded)) return [];
+    $size=strlen($decoded); if ($size<1 || $size>10*1024*1024 || $total+$size>25*1024*1024) return [];
+    $directory=dirname(__DIR__).'/uploads/communications';
+    if (!is_dir($directory) && !mkdir($directory,0755,true) && !is_dir($directory)) return [];
+    $key='m-'.bin2hex(random_bytes(16)).'.'.$allowed[$mime];
+    if (file_put_contents($directory.'/'.$key,$decoded,LOCK_EX)===false) return [];
+    $count++; $total+=$size;
+    return [['key'=>$key,'name'=>crm_text(basename(str_replace('\\','/',$name)),220),'mime'=>$mime,'size'=>$size,'url'=>'/api/api.php?action=communications.file&key='.rawurlencode($key)]];
+}
+
 function crm_mail_sync(array $config): array {
     $host = (string)($config['imap_host'] ?? '');
     $port = (int)($config['imap_port'] ?? 993);
@@ -138,7 +179,10 @@ function crm_mail_sync(array $config): array {
         $db = crm_db();
         $exists = $db->prepare("SELECT 1 FROM crm_communications WHERE channel='email' AND external_key=? LIMIT 1");
         $sites = $db->prepare('SELECT s.id FROM crm_clients c JOIN crm_sites s ON s.client_id=c.id WHERE LOWER(c.email)=? ORDER BY s.created_at DESC LIMIT 2');
-        $insert = $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'email','email','incoming',?,?,?,0,?,'delivered','',?,NULL,NULL)");
+        $ruleSiteExists = $db->prepare('SELECT 1 FROM crm_sites WHERE id=?');
+        $ruleQuery=$db->prepare('SELECT setting_value FROM crm_settings WHERE setting_key=?'); $ruleQuery->execute(['communication_mail_rules']);
+        $rules=json_decode((string)($ruleQuery->fetchColumn() ?: '[]'),true); if (!is_array($rules)) $rules=[];
+        $insert = $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,is_ignored,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'email','email','incoming',?,?,?,?,?,?,'delivered','',?,NULL,NULL)");
         foreach ($uids as $uid) {
             $overview = imap_fetch_overview($imap, (string)$uid, FT_UID);
             if (!$overview || !isset($overview[0])) continue;
@@ -158,8 +202,16 @@ function crm_mail_sync(array $config): array {
             $content = mb_substr($content !== '' ? $content : '[Письмо без текста]', 0, 20000);
             $subject = mb_substr(crm_mail_decode_header((string)($mail->subject ?? '')), 0, 500);
             $date = date('Y-m-d H:i:s', strtotime((string)($mail->date ?? 'now')) ?: time());
-            $metadata = json_encode([['kind' => 'sender', 'email' => $address]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $insert->execute([crm_uuid(), $siteId, $key, $subject, $content, $metadata, $date]);
+            $rule=crm_mail_rule($address,$subject,$rules);
+            $ignored=($rule['operation']??'')==='ignore';
+            if (($rule['operation']??'')==='assign' && (string)($rule['siteId']??'')!=='') {
+                $ruleSiteExists->execute([(string)$rule['siteId']]);
+                if ($ruleSiteExists->fetchColumn()) $siteId=(string)$rule['siteId'];
+            }
+            $fileCount=0; $fileSize=0;
+            $attachments=crm_mail_store_attachments($imap,$uid,$structure,'',$fileCount,$fileSize);
+            $metadata = json_encode(array_merge([['kind' => 'sender', 'email' => $address],['kind'=>'workflow','status'=>$ignored?'':'reply','followUpAt'=>'']],$attachments), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $insert->execute([crm_uuid(), $siteId, $key, $subject, $content, $ignored?1:0, $ignored?1:0, $metadata, $date]);
             if ($insert->rowCount() === 1) { $imported++; if ($siteId === null) $unassigned++; }
         }
         $scanned = count($uids);
@@ -195,7 +247,9 @@ function crm_mail_sync(array $config): array {
                 $content = mb_substr($content !== '' ? $content : '[Письмо без текста]', 0, 20000);
                 $subject = mb_substr(crm_mail_decode_header((string)($mail->subject ?? '')), 0, 500);
                 $date = date('Y-m-d H:i:s', strtotime((string)($mail->date ?? 'now')) ?: time());
-                $metadata = json_encode([['kind' => 'recipient', 'email' => $address]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $fileCount=0; $fileSize=0;
+                $attachments=crm_mail_store_attachments($imap,$uid,$structure,'',$fileCount,$fileSize);
+                $metadata = json_encode(array_merge([['kind' => 'recipient', 'email' => $address]],$attachments), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $insertSent->execute([crm_uuid(), $siteId, $key, $subject, $content, $metadata, $date]);
                 if ($insertSent->rowCount() === 1) { $imported++; if ($siteId === null) $unassigned++; }
             }

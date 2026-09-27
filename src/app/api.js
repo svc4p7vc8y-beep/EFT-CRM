@@ -76,6 +76,7 @@ export const crmApi = {
   logout: () => request('logout', { method: 'POST', body: {} }),
   bootstrap: (signal) => request('bootstrap', { signal }),
   saveWorkspace: (workspace, baseRevision, initialize = false) => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize } }),
+  mergeClients: (targetId, sourceId) => request('clients.merge', { method: 'POST', body: { targetId, sourceId } }),
   uploadConstructionPhoto: (stageId, file) => { const body = new FormData(); body.append('stageId', stageId); body.append('photo', file); return request('construction.photo', { method: 'POST', body }); },
   saveInventory: (inventory, baseRevision) => request('inventory.save', { method: 'PUT', body: { inventory, baseRevision } }),
   saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
@@ -88,9 +89,16 @@ export const crmApi = {
   connectorStatuses: (signal) => request('connectors.status', { signal }),
   saveMailSettings: (address, appPassword) => request('connectors.mail.configure', { method: 'POST', body: { address, appPassword } }),
   saveTelegramSettings: (botToken) => request('connectors.telegram.configure', { method: 'POST', body: { botToken } }),
+  createTelegramLink: (siteId) => request('connectors.telegram.link', { method: 'POST', body: { siteId } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
   ignoreCommunication: (messageId, ignored) => request('communications.ignore', { method: 'POST', body: { messageId, ignored } }),
+  batchCommunications: (messageIds, operation, siteId = '') => request('communications.batch', { method: 'POST', body: { messageIds, operation, siteId } }),
+  updateCommunicationWorkflow: (messageId, status, followUpAt = '') => request('communications.workflow', { method: 'POST', body: { messageId, status, followUpAt } }),
+  communicationTemplates: () => request('communications.templates'),
+  saveCommunicationTemplates: (templates) => request('communications.templates', { method: 'POST', body: { templates } }),
+  communicationRules: () => request('communications.rules'),
+  saveCommunicationRules: (rules) => request('communications.rules', { method: 'POST', body: { rules } }),
   sendCommunication: ({ siteId, channel, subject = '', text, replyTo = '', files = [] }) => {
     const body = new FormData(); body.append('siteId', siteId); body.append('channel', channel); body.append('subject', subject); body.append('text', text); body.append('replyTo', replyTo);
     files.forEach((file) => body.append('files[]', file));
