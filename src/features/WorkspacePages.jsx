@@ -1,4 +1,4 @@
-import { ArrowUpRight, Phone, Factory, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, Phone, Factory, AlertCircle, Plus } from 'lucide-react';
 import { Badge, Empty, PageHeading, Timeline } from '../components/UI.jsx';
 import { CallLink } from '../components/CallLink.jsx';
 import { ACTIVITY_TYPES, LEAD_STAGES, TASK_STAGES, dateKey, dateLabel, employee, isOverdue, leadContext, taskContext } from '../app/model.js';
