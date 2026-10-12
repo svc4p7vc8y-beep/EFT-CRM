@@ -1,5 +1,6 @@
 Options -Indexes
 DirectoryIndex index.html index.php
+AddType application/manifest+json .webmanifest
 
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
