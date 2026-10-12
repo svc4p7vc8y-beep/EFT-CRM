@@ -59,6 +59,57 @@ if ($action === 'connectors.telegram.webhook' && $method === 'POST') {
     crm_json(['ok'=>true]);
 }
 
+if ($action === 'connectors.max.webhook' && $method === 'POST') {
+    $config = crm_integration_config('max');
+    $expected = (string)($config['webhook_secret'] ?? '');
+    $received = (string)($_SERVER['HTTP_X_MAX_BOT_API_SECRET'] ?? '');
+    if ($expected === '' || !hash_equals($expected, $received)) crm_json(['ok' => false], 403);
+    $raw = file_get_contents('php://input');
+    if ($raw === false || strlen($raw) > 1024 * 1024) crm_json(['ok' => false], 413);
+    $update = json_decode($raw, true);
+    if (!is_array($update)) crm_json(['ok' => false], 422);
+    $type = (string)($update['update_type'] ?? '');
+    if ($type === 'bot_started') {
+        $token = (string)($update['payload'] ?? '');
+        $chatId = (string)($update['chat_id'] ?? '');
+        $links = is_array($config['pending_links'] ?? null) ? $config['pending_links'] : [];
+        $link = $links[$token] ?? null;
+        if ($token !== '' && preg_match('/^-?\d{1,20}$/', $chatId) && is_array($link) && (int)($link['expires'] ?? 0) >= time()) {
+            $siteId = (string)($link['siteId'] ?? '');
+            $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+            if ($site->fetchColumn()) {
+                $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
+                $map[$siteId] = $chatId; $config['site_chat_ids'] = $map;
+                unset($links[$token]); $config['pending_links'] = $links;
+                crm_store_private_integration('max', $config);
+                try { crm_http_json('https://platform-api2.max.ru/messages?chat_id=' . rawurlencode($chatId), ['text' => 'Чат подключён к ЭФТ. Ваши сообщения появятся в CRM.', 'notify' => true], ['Authorization: ' . $config['bot_token']]); }
+                catch (Throwable $error) { error_log('EFT CRM MAX welcome failed'); }
+            }
+        }
+        crm_json(['ok' => true]);
+    }
+    if ($type !== 'message_created') crm_json(['ok' => true]);
+    $message = $update['message'] ?? null;
+    if (!is_array($message) || !empty($message['sender']['is_bot'])) crm_json(['ok' => true]);
+    $chatId = (string)($message['recipient']['chat_id'] ?? '');
+    $body = is_array($message['body'] ?? null) ? $message['body'] : [];
+    $text = trim((string)($body['text'] ?? ''));
+    $mid = (string)($body['mid'] ?? '');
+    if (!preg_match('/^-?\d{1,20}$/', $chatId) || $text === '' || $mid === '') crm_json(['ok' => true]);
+    $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
+    $siteId = array_search($chatId, $map, true);
+    if ($siteId === false) crm_json(['ok' => true]);
+    crm_schema_ensure_v30();
+    $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
+    $metadata = json_encode([['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $timestamp = (int)($message['timestamp'] ?? $update['timestamp'] ?? 0);
+    $occurredAt = $timestamp > 0 ? (int)floor($timestamp / 1000) : time();
+    $insert = crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','max','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
+    $insert->execute([crm_uuid(), $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
+    if ($insert->rowCount()) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_json(['ok' => true]);
+}
+
 if ($action === 'login' && $method === 'POST') {
     crm_require_origin();
     crm_session_start();
@@ -473,6 +524,57 @@ if ($action === 'connectors.telegram.link' && $method === 'POST') {
     crm_store_private_integration('telegram',$config);
     crm_audit((int)$user['id'],'connector.telegram.link','site',$siteId);
     crm_json(['ok'=>true,'url'=>'https://t.me/'.$username.'?start='.$token,'expiresAt'=>gmdate('c',time()+86400)]);
+}
+
+if ($action === 'connectors.max.configure' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $input = crm_input(); $token = trim((string)($input['botToken'] ?? ''));
+    if (strlen($token) < 20 || strlen($token) > 512 || preg_match('/[\x00-\x20\x7F]/', $token)) {
+        crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте токен MAX-бота.'], 422);
+    }
+    try {
+        $bot = crm_http_get_json('https://platform-api2.max.ru/me', ['Authorization: ' . $token]);
+        $username = (string)($bot['username'] ?? '');
+        if (empty($bot['is_bot']) || $username === '' || !preg_match('/^[A-Za-z0-9_.-]{2,100}$/', $username)) throw new RuntimeException('Bot identity unavailable');
+    } catch (Throwable $error) {
+        crm_json(['ok' => false, 'code' => 'bot_connection_failed', 'message' => 'MAX не подтвердил токен бота. Проверьте его и повторите.'], 422);
+    }
+    $previous = crm_integration_config('max');
+    $sameBot = (string)($previous['bot_token'] ?? '') !== '' && hash_equals((string)$previous['bot_token'], $token);
+    $secret = $sameBot && preg_match('/^[a-f0-9]{48}$/', (string)($previous['webhook_secret'] ?? '')) ? (string)$previous['webhook_secret'] : bin2hex(random_bytes(24));
+    try {
+        $subscription = crm_http_json('https://platform-api2.max.ru/subscriptions', [
+            'url' => 'https://crm.eftsip.ru/api/api.php?action=connectors.max.webhook',
+            'update_types' => ['message_created', 'bot_started'], 'secret' => $secret,
+        ], ['Authorization: ' . $token]);
+        if (empty($subscription['success'])) throw new RuntimeException('Subscription rejected');
+    } catch (Throwable $error) {
+        crm_json(['ok' => false, 'code' => 'webhook_failed', 'message' => 'Бот подтверждён, но MAX не принял подписку на сообщения. Повторите подключение.'], 422);
+    }
+    crm_store_private_integration('max', [
+        'enabled' => true, 'bot_token' => $token, 'bot_username' => $username,
+        'site_chat_ids' => $sameBot && is_array($previous['site_chat_ids'] ?? null) ? $previous['site_chat_ids'] : [],
+        'pending_links' => $sameBot && is_array($previous['pending_links'] ?? null) ? $previous['pending_links'] : [],
+        'webhook_secret' => $secret,
+    ]);
+    crm_audit((int)$user['id'], 'connector.max.configure', 'integration', 'max', ['username' => $username]);
+    crm_json(['ok' => true, 'username' => $username, 'connectors' => crm_connector_statuses()]);
+}
+
+if ($action === 'connectors.max.link' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $input = crm_input(); $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
+    $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+    if (!$site->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект не найден.'], 422);
+    $config = crm_integration_config('max'); $username = (string)($config['bot_username'] ?? '');
+    if (empty($config['enabled']) || $username === '') crm_json(['ok' => false, 'code' => 'not_configured', 'message' => 'Сначала подключите MAX-бота.'], 422);
+    $links = is_array($config['pending_links'] ?? null) ? $config['pending_links'] : [];
+    $links = array_filter($links, static fn($link): bool => is_array($link) && (int)($link['expires'] ?? 0) > time());
+    $token = rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');
+    $links[$token] = ['siteId' => $siteId, 'expires' => time() + 86400]; $config['pending_links'] = $links;
+    crm_store_private_integration('max', $config);
+    crm_audit((int)$user['id'], 'connector.max.link', 'site', $siteId);
+    crm_json(['ok' => true, 'url' => 'https://max.ru/' . rawurlencode($username) . '?start=' . $token, 'expiresAt' => gmdate('c', time() + 86400)]);
 }
 
 if ($action === 'communications.mail.sync' && $method === 'POST') {

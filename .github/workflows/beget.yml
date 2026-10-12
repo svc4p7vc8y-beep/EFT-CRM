@@ -1,6 +1,8 @@
 name: Deploy EFT CRM to Beget
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -81,6 +83,7 @@ jobs:
             --exclude='api/config.local.php' \
             --exclude='api/mail.local.php' \
             --exclude='api/telegram.local.php' \
+            --exclude='api/max.local.php' \
             -e "ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
       - name: Verify CRM API

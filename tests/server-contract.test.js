@@ -68,9 +68,12 @@ test('автопубликация Beget не передаёт секретну�
   assert.match(workflow, /VITE_CRM_API_URL: \/api\//);
   assert.match(workflow, /beget-api\/index\.php/);
   assert.match(workflow, /--exclude='api\/config\.local\.php'/);
+  assert.match(workflow, /--exclude='api\/max\.local\.php'/);
+  assert.match(read('server/beget-api/.htaccess.example'), /max\\\.local\\\.php/);
   assert.match(workflow, /uploads\/communications/);
   assert.match(workflow, /test -f '.+api\/config\.local\.php'/);
   assert.match(ignore, /server\/\*\*\/config\.local\.php/);
+  assert.match(ignore, /server\/\*\*\/max\.local\.php/);
   assert.match(entrypoint, /require __DIR__ \. '\/api\.php'/);
 });
 

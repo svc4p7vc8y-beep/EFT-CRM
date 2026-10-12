@@ -636,7 +636,7 @@ function crm_require_capability(string $capability): array {
 }
 
 function crm_store_private_integration(string $channel, array $settings): void {
-    if (!in_array($channel, ['mail', 'telegram'], true)) throw new InvalidArgumentException('Unsupported integration');
+    if (!in_array($channel, ['mail', 'telegram', 'max'], true)) throw new InvalidArgumentException('Unsupported integration');
     $path = __DIR__ . '/' . $channel . '.local.php';
     $temporary = tempnam(__DIR__, '.eft-' . $channel . '-');
     if ($temporary === false) throw new RuntimeException('Не удалось подготовить настройки подключения.');
@@ -648,7 +648,7 @@ function crm_store_private_integration(string $channel, array $settings): void {
 }
 
 function crm_integration_config(string $channel): array {
-    if (in_array($channel, ['mail', 'telegram'], true)) {
+    if (in_array($channel, ['mail', 'telegram', 'max'], true)) {
         $privateFile = __DIR__ . '/' . $channel . '.local.php';
         if (is_file($privateFile)) {
             $private = require $privateFile;
@@ -679,9 +679,9 @@ function crm_connector_statuses(): array {
             'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
             'max' => $enabled && (string)($config['bot_token'] ?? '') !== '',
         };
-        $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : ($id === 'telegram' ? 'Бот' . ((string)($config['bot_username'] ?? '') !== '' ? ' @' . (string)$config['bot_username'] : '') . ' подключён' : 'Отправка настроена')) : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
+        $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : (in_array($id, ['telegram', 'max'], true) ? 'Бот' . ((string)($config['bot_username'] ?? '') !== '' ? ' @' . (string)$config['bot_username'] : '') . ' подключён' : 'Отправка настроена')) : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
         $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail,
-            'linkedSiteIds' => $id === 'telegram' && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
+            'linkedSiteIds' => in_array($id, ['telegram', 'max'], true) && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
     }
     return $result;
 }
@@ -694,6 +694,17 @@ function crm_http_json(string $url, array $payload, array $headers = []): array 
     if ($raw === false || $error !== '') throw new RuntimeException('Канал не ответил: ' . $error);
     $data = json_decode((string)$raw, true);
     if ($status < 200 || $status >= 300) throw new RuntimeException((string)($data['error']['message'] ?? $data['description'] ?? 'Ошибка внешнего канала'));
+    return is_array($data) ? $data : [];
+}
+
+function crm_http_get_json(string $url, array $headers = []): array {
+    if (!function_exists('curl_init')) throw new RuntimeException('На сервере недоступен модуль cURL.');
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_HTTPHEADER => $headers]);
+    $raw = curl_exec($curl); $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE); $error = curl_error($curl); curl_close($curl);
+    if ($raw === false || $error !== '') throw new RuntimeException('Канал не ответил: ' . $error);
+    $data = json_decode((string)$raw, true);
+    if ($status < 200 || $status >= 300) throw new RuntimeException((string)($data['message'] ?? 'Ошибка внешнего канала'));
     return is_array($data) ? $data : [];
 }
 
