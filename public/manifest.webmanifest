@@ -1,0 +1,25 @@
+{
+  "name": "ЭФТ CRM",
+  "short_name": "ЭФТ",
+  "description": "CRM строительной компании ЭФТ",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B0D0E",
+  "theme_color": "#142939",
+  "icons": [
+    {
+      "src": "./eft-icon-192-v54.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./eft-icon-512-v54.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
