@@ -1,9 +1,10 @@
 Options -Indexes
 
-<FilesMatch "^(config\.local\.php|mail\.local\.php|telegram\.local\.php|max\.local\.php|\.eft-(mail|telegram|max)-.*|config\.example\.php|schema\.sql|create-admin\.php)$">
+<FilesMatch "^(config\.local\.php|mail\.local\.php|telegram\.local\.php|max\.local\.php|\.eft-(mail|telegram|max)-.*|config\.example\.php|schema\.sql|create-admin\.php|notifications_cron\.php)$">
   Require all denied
 </FilesMatch>
 
 RewriteEngine On
+RewriteRule ^vendor/ - [F,L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ api.php [L,QSA]

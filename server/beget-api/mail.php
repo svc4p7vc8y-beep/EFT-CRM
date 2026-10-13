@@ -211,8 +211,13 @@ function crm_mail_sync(array $config): array {
             $fileCount=0; $fileSize=0;
             $attachments=crm_mail_store_attachments($imap,$uid,$structure,'',$fileCount,$fileSize);
             $metadata = json_encode(array_merge([['kind' => 'sender', 'email' => $address],['kind'=>'workflow','status'=>$ignored?'':'reply','followUpAt'=>'']],$attachments), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $insert->execute([crm_uuid(), $siteId, $key, $subject, $content, $ignored?1:0, $ignored?1:0, $metadata, $date]);
-            if ($insert->rowCount() === 1) { $imported++; if ($siteId === null) $unassigned++; }
+            $eventId = crm_uuid();
+            $insert->execute([$eventId, $siteId, $key, $subject, $content, $ignored?1:0, $ignored?1:0, $metadata, $date]);
+            if ($insert->rowCount() === 1) {
+                $imported++;
+                if ($siteId === null) $unassigned++;
+                elseif (!$ignored) crm_push_notify_site((string)$siteId, $eventId);
+            }
         }
         $scanned = count($uids);
         $prefix = '{' . $host . ':' . $port . '/imap/ssl/validate-cert}';

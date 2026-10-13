@@ -54,8 +54,12 @@ if ($action === 'connectors.telegram.webhook' && $method === 'POST') {
     $sender=(string)($message['from']['first_name']??'Telegram');
     $metadata=json_encode([['kind'=>'sender','name'=>mb_substr($sender,0,100)],['kind'=>'workflow','status'=>'reply','followUpAt'=>'']],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
     $insert=crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','telegram','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
-    $insert->execute([crm_uuid(),$siteId,$key,mb_substr($text,0,20000),$metadata,date('Y-m-d H:i:s',(int)($message['date']??time()))]);
-    if ($insert->rowCount()) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    $eventId = crm_uuid();
+    $insert->execute([$eventId,$siteId,$key,mb_substr($text,0,20000),$metadata,date('Y-m-d H:i:s',(int)($message['date']??time()))]);
+    if ($insert->rowCount()) {
+        crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        try { crm_push_notify_site((string)$siteId, $eventId); crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM Telegram push failed: ' . $error->getMessage()); }
+    }
     crm_json(['ok'=>true]);
 }
 
@@ -105,8 +109,12 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $timestamp = (int)($message['timestamp'] ?? $update['timestamp'] ?? 0);
     $occurredAt = $timestamp > 0 ? (int)floor($timestamp / 1000) : time();
     $insert = crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','max','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
-    $insert->execute([crm_uuid(), $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
-    if ($insert->rowCount()) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    $eventId = crm_uuid();
+    $insert->execute([$eventId, $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
+    if ($insert->rowCount()) {
+        crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        try { crm_push_notify_site((string)$siteId, $eventId); crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
+    }
     crm_json(['ok' => true]);
 }
 
@@ -156,6 +164,68 @@ if ($action === 'logout' && $method === 'POST') {
     }
     session_destroy();
     crm_json(['ok' => true]);
+}
+
+if ($action === 'notifications.config' && $method === 'GET') {
+    $user = crm_user();
+    $keys = crm_push_keys();
+    $count = crm_db()->prepare('SELECT COUNT(*) FROM crm_push_subscriptions WHERE user_id=? AND active=1');
+    $count->execute([(int)$user['id']]);
+    crm_json(['ok' => true, 'publicKey' => $keys['public_key'], 'preferences' => crm_push_preferences((int)$user['id']), 'devices' => (int)$count->fetchColumn()]);
+}
+
+if ($action === 'notifications.list' && $method === 'GET') {
+    $user = crm_user();
+    crm_json(array_merge(['ok' => true], crm_push_list((int)$user['id'])));
+}
+
+if ($action === 'notifications.subscribe' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input(8192); $subscription = $input['subscription'] ?? null;
+    if (!is_array($subscription)) crm_json(['ok' => false, 'message' => 'Нет подписки устройства.'], 422);
+    $endpoint = (string)($subscription['endpoint'] ?? '');
+    $p256dh = (string)($subscription['keys']['p256dh'] ?? '');
+    $auth = (string)($subscription['keys']['auth'] ?? '');
+    if (!crm_push_endpoint_allowed($endpoint) || !crm_push_key_valid($p256dh, 65) || !crm_push_key_valid($auth, 16)) {
+        crm_json(['ok' => false, 'message' => 'Браузер передал некорректную подписку.'], 422);
+    }
+    $statement = crm_db()->prepare('INSERT INTO crm_push_subscriptions (user_id, endpoint_hash, endpoint, p256dh, auth_key) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), endpoint=VALUES(endpoint), p256dh=VALUES(p256dh), auth_key=VALUES(auth_key), active=1');
+    $statement->execute([(int)$user['id'], hash('sha256', $endpoint), $endpoint, $p256dh, $auth]);
+    crm_json(['ok' => true]);
+}
+
+if ($action === 'notifications.unsubscribe' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf();
+    $input = crm_input(8192); $endpoint = (string)($input['endpoint'] ?? '');
+    if ($endpoint !== '') {
+        $statement = crm_db()->prepare('DELETE FROM crm_push_subscriptions WHERE user_id=? AND endpoint_hash=?');
+        $statement->execute([(int)$user['id'], hash('sha256', $endpoint)]);
+    }
+    crm_json(['ok' => true]);
+}
+
+if ($action === 'notifications.preferences' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30(); $input = crm_input(2048);
+    $prefs = [!empty($input['task']) ? 1 : 0, !empty($input['message']) ? 1 : 0, !empty($input['reminder']) ? 1 : 0];
+    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, task_enabled, message_enabled, reminder_enabled) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_enabled=VALUES(task_enabled), message_enabled=VALUES(message_enabled), reminder_enabled=VALUES(reminder_enabled)');
+    $statement->execute([(int)$user['id'], ...$prefs]);
+    crm_json(['ok' => true, 'preferences' => crm_push_preferences((int)$user['id'])]);
+}
+
+if ($action === 'notifications.read' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); $input = crm_input(2048);
+    $id = filter_var($input['id'] ?? null, FILTER_VALIDATE_INT);
+    if ($id === false || $id < 1) crm_json(['ok' => false, 'message' => 'Уведомление не найдено.'], 422);
+    $statement = crm_db()->prepare('UPDATE crm_notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=? AND user_id=?');
+    $statement->execute([$id, (int)$user['id']]);
+    crm_json(array_merge(['ok' => true], crm_push_list((int)$user['id'])));
+}
+
+if ($action === 'notifications.test' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    crm_push_emit((int)$user['id'], 'task', 'Проверка уведомлений ЭФТ', 'Если вы видите это сообщение, уведомления работают.', '#tasks', 'test:' . bin2hex(random_bytes(12)));
+    $sent = crm_push_dispatch(2);
+    crm_json(array_merge(['ok' => true, 'sent' => $sent], crm_push_list((int)$user['id'])));
 }
 
 if ($action === 'bootstrap' && $method === 'GET') {
@@ -583,6 +653,7 @@ if ($action === 'communications.mail.sync' && $method === 'POST') {
     if (empty($config['enabled'])) crm_json(['ok' => false, 'code' => 'not_configured', 'message' => 'Сначала подключите почтовый ящик на сервере.'], 422);
     try { $summary = crm_mail_sync($config); }
     catch (Throwable $error) { crm_json(['ok' => false, 'code' => 'mail_sync_failed', 'message' => $error->getMessage()], 422); }
+    try { crm_push_dispatch(10); } catch (Throwable $error) { error_log('EFT CRM mail push failed: ' . $error->getMessage()); }
     crm_audit((int)$user['id'], 'communication.mail.sync', 'integration', 'mail', $summary);
     crm_json(['ok' => true, 'summary' => $summary, 'workspace' => crm_workspace_for_user($user)]);
 }

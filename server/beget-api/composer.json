@@ -1,0 +1,7 @@
+{
+  "name": "eft/crm-push",
+  "type": "project",
+  "require": {
+    "minishlink/web-push": "9.0.0"
+  }
+}

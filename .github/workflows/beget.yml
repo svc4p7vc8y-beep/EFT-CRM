@@ -24,6 +24,13 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, curl, openssl
+          tools: composer:v2
+      - name: Install Web Push sender
+        run: composer install --working-dir=server/beget-api --no-dev --no-interaction --no-progress --optimize-autoloader
       - name: Check PHP API syntax
         run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Build frontend for crm.eftsip.ru
@@ -35,7 +42,8 @@ jobs:
           mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
-          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/mail.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/mail.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp -R server/beget-api/vendor release/api/vendor
           cp server/beget-api/.htaccess.example release/api/.htaccess
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess
           cp server/uploads/construction/.htaccess release/uploads/construction/.htaccess

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/mail.php';
+require_once __DIR__ . '/push.php';
 
 set_exception_handler(static function (Throwable $error): void {
     error_log('EFT CRM API error: ' . $error->getMessage());
@@ -522,6 +523,8 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             }
         }
         $employeeIds = array_fill_keys($db->query('SELECT id FROM crm_employees')->fetchAll(PDO::FETCH_COLUMN), true);
+        $previousTasks = [];
+        foreach ($db->query('SELECT id, assignee_id FROM crm_tasks')->fetchAll() as $previousTask) $previousTasks[$previousTask['id']] = (string)($previousTask['assignee_id'] ?? '');
         $db->exec('DELETE FROM crm_communications');
         $db->exec('DELETE FROM crm_tasks');
         $db->exec('DELETE FROM crm_logistics');
@@ -586,6 +589,9 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $quantity = (float)($row['quantity'] ?? 1); $completed = (float)($row['completedQty'] ?? 0);
             if ($quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
             $insertTask->execute([crm_required_text($row['id'] ?? '', 'идентификатор задачи', 36), $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+            if (!$initialize && $assignee !== '' && (!isset($previousTasks[$row['id']]) || $previousTasks[$row['id']] !== $assignee)) {
+                crm_push_emit_for_employee($assignee, 'task', 'Вам назначена задача', crm_text($row['title'] ?? '', 250), '#task/' . $row['id'], 'task:' . ($revision + 1) . ':' . $row['id']);
+            }
         }
         $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, is_ignored, attachments_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {
@@ -604,6 +610,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $db->prepare("UPDATE crm_settings SET setting_value = '1' WHERE setting_key = 'workspace_initialized'")->execute();
         $db->commit();
         crm_audit((int)$user['id'], $initialize && !$initialized ? 'workspace.initialize' : 'workspace.save', 'workspace', (string)$nextRevision, ['clients' => count($clients), 'tasks' => count($tasks)]);
+        try { crm_push_dispatch(8); } catch (Throwable $error) { error_log('EFT CRM push dispatch failed: ' . $error->getMessage()); }
         return crm_public_workspace();
     } catch (Throwable $error) {
         if ($db->inTransaction()) $db->rollBack();

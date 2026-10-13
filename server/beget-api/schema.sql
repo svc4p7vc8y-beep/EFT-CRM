@@ -428,3 +428,55 @@ CREATE TABLE IF NOT EXISTS crm_settings (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_push_keys (
+  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  public_key VARCHAR(120) NOT NULL,
+  private_key VARCHAR(120) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_push_subscriptions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  endpoint_hash CHAR(64) NOT NULL,
+  endpoint TEXT NOT NULL,
+  p256dh VARCHAR(160) NOT NULL,
+  auth_key VARCHAR(80) NOT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_push_endpoint (endpoint_hash),
+  KEY idx_crm_push_user (user_id, active),
+  CONSTRAINT fk_crm_push_subscription_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_notification_preferences (
+  user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  task_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  message_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  reminder_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_crm_notification_preferences_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_notifications (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  kind ENUM('task','message','reminder') NOT NULL,
+  title VARCHAR(180) NOT NULL,
+  body VARCHAR(300) NOT NULL,
+  target_path VARCHAR(200) NOT NULL,
+  event_key VARCHAR(190) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at DATETIME NULL,
+  push_sent_at DATETIME NULL,
+  push_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_notification_event (user_id, event_key),
+  KEY idx_crm_notifications_user (user_id, created_at),
+  KEY idx_crm_notifications_queue (push_sent_at, next_attempt_at, push_attempts),
+  CONSTRAINT fk_crm_notifications_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
