@@ -41,4 +41,4 @@ jobs:
           [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]
           ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
-            "cd '${BEGET_DEPLOY_PATH%/}/api' && php notifications_cron.php"
+            "cd '${BEGET_DEPLOY_PATH%/}/api' && php -v && php -d display_errors=1 notifications_cron.php"
