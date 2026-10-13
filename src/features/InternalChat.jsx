@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bell, Check, CheckCheck, MessageCircle, Plus, Send, Users } from 'lucide-react';
+import { ArrowLeft, Bell, Check, CheckCheck, FileText, MessageCircle, Paperclip, Plus, Send, Users, X } from 'lucide-react';
 import { Dialog, PageHeading, VoiceInput } from '../components/UI.jsx';
 import { demoChatApi } from './chatDemo.js';
 import './internal-chat.css';
@@ -18,6 +18,16 @@ function MessageReceipt({ messageId, currentUserId, receipts }) {
       : <div className="chat-receipt-details">Других активных участников пока нет.</div>}</details>;
 }
 
+function MessageAttachment({ file, fileUrl }) {
+  const url = file.url || fileUrl?.(file.key);
+  if (!url) return null;
+  const preview = /^image\/(jpeg|png|webp)$/.test(file.mime || '');
+  return <a className={`chat-attachment ${preview ? 'chat-attachment-image' : ''}`} href={url} target="_blank" rel="noopener noreferrer" download={preview ? undefined : file.name}>
+    {preview ? <img src={url} alt={file.name} loading="lazy" /> : <FileText size={22} />}
+    <span>{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</span>
+  </a>;
+}
+
 export function InternalChat({ runtime, employees, requestedThreadId = '', context, onContextConsumed, onSelectThread, onOpenContext }) {
   const demo = useMemo(() => demoChatApi(employees), [employees]);
   const api = runtime.chatList ? runtime : demo;
@@ -29,6 +39,7 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [receipts, setReceipts] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
+  const [files, setFiles] = useState([]);
   const [filter, setFilter] = useState('');
   const [create, setCreate] = useState(null);
   const [recipientSearch, setRecipientSearch] = useState('');
@@ -37,6 +48,7 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [error, setError] = useState('');
   const [mobileThread, setMobileThread] = useState(Boolean(requestedThreadId));
   const messagesRef = useRef(null);
+  const fileInputRef = useRef(null);
   const loadedOlder = useRef(false);
   const lastReadRef = useRef({ threadId: '', messageId: 0 });
   const pendingReadRef = useRef({ threadId: '', messageId: 0 });
@@ -109,8 +121,15 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   }, [selectedId, mobileThread]);
 
   function selectThread(id) {
-    setSelectedId(id); setMobileThread(true); setError('');
+    setSelectedId(id); setMobileThread(true); setError(''); setDraft(''); setFiles([]);
     onSelectThread(id);
+  }
+  function queueFiles(selected) {
+    const next = [...files, ...Array.from(selected || [])];
+    if (next.length > 5 || next.some((file) => file.size < 1 || file.size > 10 * 1024 * 1024) || next.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
+      setError('До пяти файлов: каждый не больше 10 МБ, вместе не больше 25 МБ.'); return;
+    }
+    setFiles(next); setError('');
   }
   async function loadPrevious() {
     if (!messages.length) return;
@@ -121,12 +140,12 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
     } catch (failure) { setError(failure.message); }
   }
   async function submitMessage(event) {
-    event.preventDefault(); const body = draft.trim(); if (!body || !selectedId || sending) return;
+    event.preventDefault(); const body = draft.trim(); if ((!body && !files.length) || !selectedId || sending) return;
     setSending(true); setError('');
     try {
-      const result = await apiRef.current.chatSend(selectedId, body);
+      const result = await apiRef.current.chatSend(selectedId, body, files);
       setMessages((previous) => previous.some((message) => message.id === result.message.id) ? previous : [...previous, result.message]);
-      setDraft(''); await loadThreads();
+      setDraft(''); setFiles([]); await loadThreads();
       requestAnimationFrame(() => { if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight; });
     } catch (failure) { setError(failure.message); }
     finally { setSending(false); }
@@ -149,7 +168,7 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const recipients = users.filter((user) => String(user.id) !== currentUserId && user.name.toLocaleLowerCase('ru-RU').includes(recipientSearch.toLocaleLowerCase('ru-RU')));
   const memberNames = selected?.memberIds?.filter((id) => String(id) !== currentUserId).map((id) => users.find((user) => String(user.id) === String(id))?.name).filter(Boolean) || [];
 
-  return <section className="page internal-chat-page">
+  return <section className={`page internal-chat-page ${mobileThread ? 'mobile-thread-page' : ''}`}>
     <PageHeading title="Внутренний чат" description="Личные сообщения, группы и обсуждения задач и заявок"><div className="internal-chat-actions"><button className="button" onClick={() => startCreate('direct')}><MessageCircle size={17} />Личное</button><button className="button primary" onClick={() => startCreate('group')}><Plus size={17} />Группа</button></div></PageHeading>
     {runtime.mode === 'demo' ? <p className="chat-demo-note">Предпросмотр: сообщения сохраняются только в этом браузере. Для доставки сотрудникам откройте рабочую CRM.</p> : null}
     <div className={`internal-chat-layout ${mobileThread ? 'mobile-thread-open' : ''}`}>
@@ -157,8 +176,9 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
         <div className="chat-thread-items">{filteredThreads.map((thread) => <button key={thread.id} className={`chat-thread-item ${selectedId === thread.id ? 'active' : ''}`} onClick={() => selectThread(thread.id)}><span className="chat-thread-avatar">{thread.type === 'all' || thread.type === 'group' ? <Users size={20} /> : <MessageCircle size={20} />}</span><span className="chat-thread-copy"><strong>{thread.title}</strong><small>{typeNames[thread.type]} · {thread.memberIds?.length || 0} участников</small><span>{thread.lastBody || 'Начните разговор'}</span></span>{thread.unread ? <b className="chat-unread">{thread.unread}</b> : null}</button>)}{!filteredThreads.length ? <p className="chat-empty-list">Чаты не найдены.</p> : null}</div>
       </aside>
       <div className="chat-conversation">{selected ? <><header className="chat-conversation-head"><button className="icon-button chat-back" aria-label="К списку чатов" onClick={() => setMobileThread(false)}><ArrowLeft size={21} /></button><div><strong>{selected.title}</strong><span>{selected.type === 'all' ? `Все пользователи CRM · ${selected.memberIds.length}` : memberNames.length ? memberNames.join(', ') : typeNames[selected.type]}</span></div>{selected.contextId ? <button className="button chat-context-link" onClick={() => onOpenContext(selected.type, selected.contextId)}>Открыть {selected.type === 'task' ? 'задачу' : 'заявку'}</button> : null}</header>
-        <div className="chat-message-list" ref={messagesRef} onScroll={readVisibleMessages}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong><p>{message.body}</p><time>{stamp(message.createdAt)}</time>{String(message.authorId) === currentUserId ? <MessageReceipt messageId={message.id} currentUserId={currentUserId} receipts={receipts} /> : null}</article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
-        <form className="chat-compose" onSubmit={submitMessage}><VoiceInput><textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={5000} rows={2} placeholder="Сообщение участникам…" aria-label="Текст сообщения" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></VoiceInput><button className="button primary" type="submit" disabled={sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={19} /><span>{sending ? 'Отправляем…' : 'Отправить'}</span></button></form>
+        <div className="chat-message-list" ref={messagesRef} onScroll={readVisibleMessages}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong>{message.body ? <p>{message.body}</p> : null}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((file) => <MessageAttachment file={file} fileUrl={api.chatFileUrl} key={file.key} />)}</div> : null}<time>{stamp(message.createdAt)}</time>{String(message.authorId) === currentUserId ? <MessageReceipt messageId={message.id} currentUserId={currentUserId} receipts={receipts} /> : null}</article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
+        {files.length ? <div className="chat-file-queue">{files.map((file, index) => <span key={`${file.name}-${index}`}><Paperclip size={13} />{file.name}<button type="button" aria-label={`Убрать ${file.name}`} onClick={() => setFiles((current) => current.filter((_, position) => position !== index))}><X size={13} /></button></span>)}</div> : null}
+        <form className="chat-compose" onSubmit={submitMessage}><input ref={fileInputRef} type="file" multiple hidden accept="image/*,.pdf,.txt,.zip,.docx,.xlsx" onChange={(event) => { queueFiles(event.target.files); event.target.value = ''; }} /><button className="button chat-attach-button" type="button" aria-label="Прикрепить фотографии или файлы" title="Прикрепить фотографии или файлы" onClick={() => fileInputRef.current?.click()}><Paperclip size={19} /></button><VoiceInput><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); queueFiles(event.clipboardData.files); } }} maxLength={5000} rows={2} placeholder="Сообщение или файл…" aria-label="Текст сообщения" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></VoiceInput><button className="button primary" type="submit" disabled={sending || (!draft.trim() && !files.length)} aria-label="Отправить сообщение"><Send size={19} /><span>{sending ? 'Отправляем…' : 'Отправить'}</span></button></form>
         <p className="chat-delivery-hint"><Bell size={13} />Доставка отмечается при получении чатов в CRM, прочтение — при открытии диалога. Push сам по себе не означает прочтение.</p>
       </> : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Выберите чат</strong></div>}</div>
     </div>

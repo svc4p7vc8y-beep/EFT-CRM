@@ -39,7 +39,7 @@ jobs:
         run: npm run build
       - name: Prepare deployment package
         run: |
-          mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications
+          mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications release/uploads/chat
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
           cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
@@ -48,6 +48,7 @@ jobs:
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess
           cp server/uploads/construction/.htaccess release/uploads/construction/.htaccess
           cp server/uploads/communications/.htaccess release/uploads/communications/.htaccess
+          cp server/uploads/chat/.htaccess release/uploads/chat/.htaccess
       - name: Validate deployment secrets
         env:
           BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}

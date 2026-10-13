@@ -1,4 +1,4 @@
-.mobile-search-toggle,.mobile-bottom-nav,.mobile-top-logo{display:none}
+.mobile-search-toggle,.mobile-settings-toggle,.mobile-bottom-nav,.mobile-top-logo{display:none}
 .mobile-thread-back{display:none}
 .refresh-spinning{animation:refresh-spin 1s linear infinite}
 @keyframes refresh-spin{to{transform:rotate(360deg)}}
@@ -20,6 +20,7 @@
   .topbar-clock span{font-size:10px;line-height:1.2}
   .topbar .theme-switcher{display:block;order:3;margin-left:0;flex:0 0 36px}
   .topbar .theme-switcher>summary{width:36px;height:36px}
+  .mobile-settings-toggle{display:inline-flex;order:3;width:36px;height:36px;flex:0 0 36px}
   .mobile-search-toggle{display:inline-flex;order:4;width:36px;height:36px}
   .notification-button{order:5;width:36px;height:36px}
   .topbar .profile-button{display:flex;order:6;padding:0;border:0}
@@ -108,8 +109,8 @@
 @media(max-width:350px){
   .topbar{gap:3px;padding-inline:6px}
   .topbar .mobile-top-logo{flex-basis:48px;width:48px;height:40px}
-  .topbar .theme-switcher{flex-basis:32px}
-  .topbar .theme-switcher>summary,.mobile-search-toggle,.notification-button{width:32px;height:34px}
+  .topbar .theme-switcher,.mobile-settings-toggle{flex-basis:32px}
+  .topbar .theme-switcher>summary,.mobile-settings-toggle,.mobile-search-toggle,.notification-button{width:32px;height:34px}
   .topbar-clock span{font-size:8px}
   .topbar .profile-avatar{width:30px;height:30px}
 }

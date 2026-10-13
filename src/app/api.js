@@ -85,7 +85,13 @@ export const crmApi = {
   chatList: () => request('chat.list'),
   chatMessages: (threadId, before = '') => request('chat.messages', { query: { threadId, before } }),
   chatCreate: (type, userIds = [], title = '', contextId = '') => request('chat.create', { method: 'POST', body: { type, userIds, title, contextId } }),
-  chatSend: (threadId, body) => request('chat.send', { method: 'POST', body: { threadId, body } }),
+  chatSend: (threadId, body, files = []) => {
+    if (!files.length) return request('chat.send', { method: 'POST', body: { threadId, body } });
+    const form = new FormData(); form.append('threadId', threadId); form.append('body', body);
+    files.forEach((file) => form.append('files[]', file));
+    return request('chat.send', { method: 'POST', body: form });
+  },
+  chatFileUrl: (key) => actionUrl('chat.file', { key }),
   chatRead: (threadId, messageId) => request('chat.read', { method: 'POST', body: { threadId, messageId } }),
   answerTask: (taskId, answer) => request('tasks.answer', { method: 'POST', body: { taskId, answer } }),
   createTask: (task) => request('tasks.create', { method: 'POST', body: { task } }),

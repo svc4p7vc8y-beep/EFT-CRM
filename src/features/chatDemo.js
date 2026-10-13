@@ -9,6 +9,7 @@ function read() {
 }
 
 function write(data) { localStorage.setItem(KEY, JSON.stringify(data)); }
+const dataUrl = (file) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
 
 export function demoChatApi(employees) {
   const users = [{ id: 'me', name: 'Вы (демо)', employeeId: '' }, ...employees.filter((person) => person.active).map((person) => ({ id: person.id, name: person.name, employeeId: person.id }))];
@@ -16,7 +17,7 @@ export function demoChatApi(employees) {
     const data = read();
     return { users, threads: data.threads.map((thread) => {
       const latest = data.messages.filter((message) => message.threadId === thread.id).at(-1);
-      return { ...thread, memberIds: thread.type === 'all' ? users.map((user) => user.id) : thread.memberIds, lastBody: latest?.body || '', lastMessageId: latest?.id || 0, unread: 0 };
+      return { ...thread, memberIds: thread.type === 'all' ? users.map((user) => user.id) : thread.memberIds, lastBody: latest?.body || (latest?.attachments?.length ? 'Вложение' : ''), lastMessageId: latest?.id || 0, unread: 0 };
     }) };
   };
   return {
@@ -36,9 +37,11 @@ export function demoChatApi(employees) {
       const thread = { id: crypto.randomUUID(), type, title: title || users.find((user) => user.id === userIds[0])?.name || 'Обсуждение', contextId, memberIds: ['me', ...userIds], updatedAt: new Date().toISOString() };
       data.threads.unshift(thread); write(data); return { threadId: thread.id };
     },
-    chatSend: async (threadId, body) => {
+    chatSend: async (threadId, body, files = []) => {
+      if (files.some((file) => file.size > 700000) || files.reduce((total, file) => total + file.size, 0) > 1500000) throw new Error('В предпросмотре доступны небольшие файлы. Большие вложения отправляйте в рабочей CRM.');
       const data = read();
-      const message = { id: (data.messages.at(-1)?.id || 0) + 1, threadId, authorId: 'me', authorName: 'Вы (демо)', body, createdAt: new Date().toISOString() };
+      const attachments = await Promise.all(files.map(async (file) => ({ key: crypto.randomUUID(), name: file.name, mime: file.type, size: file.size, url: await dataUrl(file) })));
+      const message = { id: (data.messages.at(-1)?.id || 0) + 1, threadId, authorId: 'me', authorName: 'Вы (демо)', body, attachments, createdAt: new Date().toISOString() };
       data.messages.push(message); const thread = data.threads.find((item) => item.id === threadId); if (thread) thread.updatedAt = message.createdAt;
       write(data); return { message };
     },

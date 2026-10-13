@@ -110,7 +110,7 @@ export function AuthRoot() {
   return <App runtime={{ mode: 'server', user: auth.session.user, capabilities: auth.session.capabilities, financeUnlocked: Boolean(auth.workspace.financeUnlocked), serverData: auth.workspace,
     notificationConfig: crmApi.notificationConfig, notifications: crmApi.notifications, subscribePush: crmApi.subscribePush,
     chatList: crmApi.chatList, chatMessages: crmApi.chatMessages, chatCreate: crmApi.chatCreate,
-    chatSend: crmApi.chatSend, chatRead: crmApi.chatRead,
+    chatSend: crmApi.chatSend, chatRead: crmApi.chatRead, chatFileUrl: crmApi.chatFileUrl,
     unsubscribePush: crmApi.unsubscribePush, saveNotificationPreferences: crmApi.saveNotificationPreferences,
     readNotification: crmApi.readNotification, testNotification: crmApi.testNotification,
     answerTask: crmApi.answerTask,

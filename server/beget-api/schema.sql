@@ -522,6 +522,20 @@ CREATE TABLE IF NOT EXISTS crm_chat_messages (
   CONSTRAINT fk_crm_chat_message_author FOREIGN KEY (author_user_id) REFERENCES crm_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_chat_files (
+  id CHAR(36) NOT NULL,
+  message_id BIGINT UNSIGNED NOT NULL,
+  storage_key VARCHAR(64) NOT NULL,
+  original_name VARCHAR(220) NOT NULL,
+  mime_type VARCHAR(120) NOT NULL,
+  size_bytes BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_chat_file_key (storage_key),
+  KEY idx_crm_chat_file_message (message_id),
+  CONSTRAINT fk_crm_chat_file_message FOREIGN KEY (message_id) REFERENCES crm_chat_messages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Kept separately because workspace saves rebuild crm_tasks in one transaction.
 CREATE TABLE IF NOT EXISTS crm_task_questions (
   task_id CHAR(36) NOT NULL PRIMARY KEY,

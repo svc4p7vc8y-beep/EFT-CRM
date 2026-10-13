@@ -7,3 +7,15 @@
 .task-assignee-picker select{min-width:0;width:100%;height:30px;padding:0 23px 0 5px;border:1px solid transparent;border-radius:5px;background-color:transparent;color:var(--text);font:inherit;cursor:pointer;text-overflow:ellipsis}.task-assignee-picker:hover select,.task-assignee-picker select:focus{border-color:#b9cbd7;background-color:var(--surface,#fff);outline:none}.task-assignee-picker.side{width:100%}.task-assignee-picker.side select{font-size:11px}.task-side dd{min-width:0}
 
 .assignment-section{border-left:3px solid #d89a27}.assignment-section>h2{background:#fff8e9;color:#6f4b12}.task-metrics article.unassigned{color:#d18a1e}.all-tasks-caption{font-size:12px;color:#597187}.unassigned-avatar{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#fff0cf;color:#a36100}.my-task-row>time.no-date{color:#a86813;font-weight:600;font-size:10px}
+.my-tasks-page .task-quick-add{grid-template-columns:minmax(240px,1fr) 190px 165px auto}
+.my-tasks-page .task-quick-add.has-custom-date{grid-template-columns:minmax(240px,1fr) 190px 165px minmax(185px,210px) auto}
+.task-quick-actions{display:flex;align-items:stretch;gap:7px;white-space:nowrap}
+.task-quick-actions .button{min-height:44px;font-size:11px}
+.my-tasks-page .task-controls>.task-question-filter{min-height:39px;font-size:11px}
+.task-view-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.task-view-actions .view-switch{margin-left:0}
+.task-view-actions>.task-question-filter{min-height:39px;font-size:11px}
+.my-tasks-page .task-controls .task-view-actions .segmented:first-child{width:auto;justify-content:flex-start;flex:0 0 auto}
+.my-tasks-page .task-controls .task-view-actions>.task-question-filter{margin:0;flex:0 0 auto}
+@media(max-width:1100px){.my-tasks-page .task-quick-add,.my-tasks-page .task-quick-add.has-custom-date{grid-template-columns:repeat(2,minmax(0,1fr))}.task-quick-actions{grid-column:1/-1}}
+@media(max-width:480px){.my-tasks-page .task-quick-add,.my-tasks-page .task-quick-add.has-custom-date{grid-template-columns:minmax(0,1fr)}.task-quick-actions{grid-column:1}.task-quick-actions .button{flex:1;min-width:0;padding:7px;font-size:10px}.task-view-actions{order:4;width:100%;justify-content:flex-end;gap:5px}.task-view-actions>.task-question-filter{display:inline-flex;padding-inline:6px;font-size:10px}.my-tasks-page .task-metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}.my-tasks-page .task-metrics article{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding:7px 5px}.my-tasks-page .task-metrics article svg{width:16px;height:16px}.my-tasks-page .task-metrics span{font-size:9px;line-height:1.15;overflow-wrap:anywhere}.my-tasks-page .task-metrics strong{font-size:17px;margin-top:3px}}
