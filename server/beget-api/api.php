@@ -228,6 +228,32 @@ if ($action === 'notifications.test' && $method === 'POST') {
     crm_json(array_merge(['ok' => true, 'sent' => $sent], crm_push_list((int)$user['id'])));
 }
 
+if ($action === 'tasks.answer' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input(8192);
+    $taskId = crm_required_text($input['taskId'] ?? '', 'задачу', 36);
+    $answer = crm_required_text($input['answer'] ?? '', 'ответ', 5000);
+    $db = crm_db(); $db->beginTransaction();
+    try {
+        $lookup = $db->prepare('SELECT t.id, t.title, t.assignee_id, t.status, q.question, q.answer AS previous_answer, q.requester_user_id FROM crm_tasks t JOIN crm_task_questions q ON q.task_id=t.id WHERE t.id=? FOR UPDATE');
+        $lookup->execute([$taskId]); $task = $lookup->fetch();
+        if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Вопрос к задаче не найден.'], 404); }
+        if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
+            $db->rollBack(); crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Ответить может назначенный исполнитель.'], 403);
+        }
+        if ($task['previous_answer'] !== '') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_answered', 'message' => 'Ответ уже отправлен. Обновите задачу, чтобы увидеть его.'], 409); }
+        $db->prepare('UPDATE crm_task_questions SET answer=?, answered_by_user_id=?, answered_at=NOW() WHERE task_id=?')->execute([$answer, (int)$user['id'], $taskId]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        if ((int)$task['requester_user_id'] !== (int)$user['id']) {
+            crm_push_emit((int)$task['requester_user_id'], 'task', 'Получен ответ на вопрос', $answer, '#task/' . $taskId, 'answer:' . $taskId . ':' . bin2hex(random_bytes(8)));
+        }
+        $db->commit();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    crm_audit((int)$user['id'], 'task.answer', 'task', $taskId, ['requesterUserId' => (int)$task['requester_user_id']]);
+    try { crm_push_dispatch(4); } catch (Throwable $error) { error_log('EFT CRM answer push failed: ' . $error->getMessage()); }
+    crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
+}
+
 if ($action === 'bootstrap' && $method === 'GET') {
     $user = crm_user();
     crm_schema_ensure_v30();

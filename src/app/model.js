@@ -134,9 +134,12 @@ export function applyCommand(current, action, payload = {}) {
     const existing = state.tasks.find((v) => v.id === payload.id);
     if (action === 'task.update' && !existing) throw new Error('Задание не найдено');
     const template = state.taskTemplates.find((t) => t.id === payload.templateId);
-    const task = existing || { id: uid(), createdAt: new Date().toISOString(), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '', siteId: '', constructionStageId: '', crewId: '', originalDueAt: '', rescheduleHistory: [] };
-    const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason'].includes(key))) };
+    const task = existing || { id: uid(), createdAt: new Date().toISOString(), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '', siteId: '', constructionStageId: '', crewId: '', originalDueAt: '', rescheduleHistory: [], question: '', answer: '', answeredAt: '' };
+    const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason', 'question'].includes(key))) };
     next.title = requireText(next.title, 'Название задания'); next.description = text(next.description); next.unit = requireText(next.unit, 'Единица'); next.blockReason = text(next.blockReason);
+    next.question = text(next.question, 5000);
+    if (next.question !== (task.question || '')) { next.answer = ''; next.answeredAt = ''; next.answeredByName = ''; next.questionRequesterName = String(payload.questionRequesterName || 'Автор вопроса'); }
+    if (next.question && !next.assigneeId) throw new Error('Для вопроса выберите исполнителя');
     if (next.orderId && !state.orders.some((v) => v.id === next.orderId)) throw new Error('Выберите заказ');
     const orderSiteId = state.orders.find((value) => value.id === next.orderId)?.siteId || '';
     next.siteId = next.siteId || orderSiteId;
@@ -151,6 +154,7 @@ export function applyCommand(current, action, payload = {}) {
     next.dueAt = validDue(next.dueAt); next.quantity = Number(next.quantity); next.completedQty = Number(next.completedQty);
     if (!Number.isFinite(next.quantity) || next.quantity <= 0 || !Number.isFinite(next.completedQty) || next.completedQty < 0 || next.completedQty > next.quantity) throw new Error('Готовый объём должен быть от 0 до общего объёма');
     if (next.status === 'done') {
+      if (next.question && !next.answer) throw new Error('Сначала дождитесь ответа на вопрос');
       if (next.checklist.some((v) => !v.done)) throw new Error('Выполните все пункты чек-листа перед приёмкой');
       next.completedQty = next.quantity;
     }
@@ -208,6 +212,11 @@ export function applyCommand(current, action, payload = {}) {
     const next = { id: existing?.id || uid(), name, specialty: text(payload.specialty, 100), leadId: payload.leadId || '', memberIds, phone: text(payload.phone, 60), notes: text(payload.notes, 2000), active: payload.active !== false && payload.active !== 'false' };
     if (next.leadId && !memberIds.includes(next.leadId)) throw new Error('Бригадир должен входить в состав бригады');
     if (existing) Object.assign(existing, next); else state.crews.push(next);
+  } else if (action === 'task.answer') {
+    const task = state.tasks.find((value) => value.id === payload.id); if (!task || !task.question) throw new Error('Вопрос к задаче не найден');
+    if (task.answer) throw new Error('Ответ уже отправлен');
+    task.answer = requireText(payload.answer, 'Ответ').slice(0, 5000); task.answeredAt = new Date().toISOString(); task.answeredByName = String(payload.answeredByName || 'Сотрудник');
+    log(state, task.siteId || '', `Ответ на вопрос по задаче: ${task.title}`, task.id);
   } else if (action === 'task.check') {
     const task = state.tasks.find((v) => v.id === payload.id); if (!task) throw new Error('Задание не найдено');
     if (task.status === 'done') throw new Error('Сначала верните задание в работу');
@@ -241,7 +250,7 @@ export function validateState(state) {
   for (const task of state.tasks) {
     const taskOrderSite = state.orders.find((order) => order.id === task.orderId)?.siteId || '';
     const taskStage = state.constructionStages.find((stage) => stage.id === task.constructionStageId);
-    if ((task.orderId && !has('orders', task.orderId)) || (task.siteId && !has('sites', task.siteId)) || (task.orderId && task.siteId !== taskOrderSite) || (task.constructionStageId && (!taskStage || taskStage.siteId !== task.siteId)) || (task.crewId && !state.crews.some((crew) => crew.id === task.crewId)) || (task.assigneeId && !has('employees', task.assigneeId)) || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean') || typeof task.originalDueAt !== 'string' || !Array.isArray(task.rescheduleHistory) || task.rescheduleHistory.some((entry) => !entry || typeof entry.from !== 'string' || typeof entry.to !== 'string' || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at)))) throw new Error('Некорректное производственное задание');
+    if ((task.orderId && !has('orders', task.orderId)) || (task.siteId && !has('sites', task.siteId)) || (task.orderId && task.siteId !== taskOrderSite) || (task.constructionStageId && (!taskStage || taskStage.siteId !== task.siteId)) || (task.crewId && !state.crews.some((crew) => crew.id === task.crewId)) || (task.assigneeId && !has('employees', task.assigneeId)) || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean') || typeof task.originalDueAt !== 'string' || !Array.isArray(task.rescheduleHistory) || task.rescheduleHistory.some((entry) => !entry || typeof entry.from !== 'string' || typeof entry.to !== 'string' || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at))) || typeof (task.question ?? '') !== 'string' || (task.question ?? '').length > 5000 || typeof (task.answer ?? '') !== 'string' || (task.answer ?? '').length > 5000) throw new Error('Некорректное производственное задание');
     validDue(task.dueAt);
     if (task.originalDueAt) validDue(task.originalDueAt);
     for (const entry of task.rescheduleHistory) { if (entry.from) validDue(entry.from); validDue(entry.to); }

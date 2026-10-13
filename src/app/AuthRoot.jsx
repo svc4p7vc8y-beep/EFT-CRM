@@ -111,6 +111,7 @@ export function AuthRoot() {
     notificationConfig: crmApi.notificationConfig, notifications: crmApi.notifications, subscribePush: crmApi.subscribePush,
     unsubscribePush: crmApi.unsubscribePush, saveNotificationPreferences: crmApi.saveNotificationPreferences,
     readNotification: crmApi.readNotification, testNotification: crmApi.testNotification,
+    answerTask: crmApi.answerTask,
     saveWorkspace: async (workspace, baseRevision, initialize = false) => {
       const result = await crmApi.saveWorkspace(workspace, baseRevision, initialize);
       updateWorkspace(result);

@@ -42,6 +42,20 @@ test('общая задача может быть без исполнителя 
   state=applyCommand(state,'task.update',{id:state.tasks[0].id,assigneeId:'manager-1'});
   assert.equal(state.tasks[0].assigneeId,'manager-1');
 });
+test('вопрос требует исполнителя, ответ сохраняется и не завершает задачу', () => {
+  let state = createDemoState();
+  assert.throws(() => applyCommand(state, 'task.create', { title: 'Уточнить поставку', question: 'Когда будет крепёж?', assigneeId: '', unit: 'задача', quantity: 1, completedQty: 0, status: 'planned', priority: 'normal' }), /выберите исполнителя/);
+  state = applyCommand(state, 'task.create', { title: 'Уточнить поставку', question: 'Когда будет крепёж?', assigneeId: 'manager-1', unit: 'задача', quantity: 1, completedQty: 0, status: 'planned', priority: 'normal' });
+  const id = state.tasks[0].id;
+  assert.throws(() => applyCommand(state, 'task.update', { id, status: 'done' }), /дождитесь ответа/);
+  state = applyCommand(state, 'task.answer', { id, answer: 'В пятницу до обеда', answeredByName: 'Исполнитель' });
+  assert.equal(state.tasks[0].answer, 'В пятницу до обеда');
+  assert.equal(state.tasks[0].status, 'planned');
+  assert.throws(() => applyCommand(state, 'task.answer', { id, answer: 'Повтор' }), /уже отправлен/);
+  state = applyCommand(state, 'task.update', { id, question: 'Сколько коробок?' });
+  assert.equal(state.tasks[0].answer, '');
+  assert.equal(state.tasks[0].question, 'Сколько коробок?');
+});
 test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
   let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });
   const person = state.employees.at(-1);

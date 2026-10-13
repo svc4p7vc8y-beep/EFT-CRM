@@ -1,7 +1,7 @@
 self.addEventListener('push', (event) => {
   let message = {};
   try { message = event.data?.json() || {}; } catch { message = {}; }
-  const url = typeof message.url === 'string' && /^#(?:tasks|task\/[a-f0-9-]{36}|communications)$/.test(message.url) ? message.url : '#overview';
+  const url = typeof message.url === 'string' && /^#(?:tasks|task\/[A-Za-z0-9_-]{1,36}|communications)$/.test(message.url) ? message.url : '#overview';
   event.waitUntil(self.registration.showNotification(message.title || 'ЭФТ CRM', {
     body: message.body || 'Появилось новое уведомление.',
     icon: './eft-icon-192-v54.png',

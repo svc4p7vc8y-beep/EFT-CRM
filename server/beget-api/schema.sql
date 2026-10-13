@@ -480,3 +480,18 @@ CREATE TABLE IF NOT EXISTS crm_notifications (
   KEY idx_crm_notifications_queue (push_sent_at, next_attempt_at, push_attempts),
   CONSTRAINT fk_crm_notifications_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Kept separately because workspace saves rebuild crm_tasks in one transaction.
+CREATE TABLE IF NOT EXISTS crm_task_questions (
+  task_id CHAR(36) NOT NULL PRIMARY KEY,
+  question TEXT NOT NULL,
+  requester_user_id BIGINT UNSIGNED NOT NULL,
+  answer TEXT NOT NULL,
+  answered_by_user_id BIGINT UNSIGNED NULL,
+  asked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  answered_at DATETIME NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_crm_task_questions_requester (requester_user_id, answered_at),
+  CONSTRAINT fk_crm_task_question_requester FOREIGN KEY (requester_user_id) REFERENCES crm_users(id),
+  CONSTRAINT fk_crm_task_question_answerer FOREIGN KEY (answered_by_user_id) REFERENCES crm_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
