@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CheckCircle2, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
 import { Badge, Empty, Timeline, VoiceInput } from '../components/UI.jsx';
 import { CallLink } from '../components/CallLink.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
+import { briefReadiness, CALCULATOR_URL, downloadCalculatorBrief } from '../app/buildingBrief.js';
+import '../components/building-brief.css';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
 
@@ -20,6 +22,14 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
   const attachments = useMemo(() => state.attachments.filter((item) => item.siteId === site.id), [state.attachments, site.id]);
   const stageIndex = Math.max(0, LEAD_STAGES.findIndex((stage) => stage.id === lead.status));
   const progress = lead.status === 'lost' ? 0 : Math.round(((stageIndex + 1) / (LEAD_STAGES.length - 1)) * 100);
+  const brief = site.buildingBrief || {};
+  const missingBrief = briefReadiness(brief);
+
+  function transferToCalculator() {
+    downloadCalculatorBrief({ client, site, lead });
+    window.open(CALCULATOR_URL, '_blank', 'noopener,noreferrer');
+    notify('Анкета скачана. В калькуляторе нажмите «Импортировать заявку клиента» и выберите файл.');
+  }
 
   function saveNextAction(event) {
     event.preventDefault();
@@ -70,6 +80,12 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
 
     <div className="client-layout">
       <div className="client-main">
+        <section className="client-panel client-building-brief"><div className="client-section-title"><div><FileText size={19} /><h2>Параметры постройки</h2></div><button className="button" onClick={onEditLead}>Изменить</button></div>
+          <div className="brief-summary"><span><strong>{brief.buildingType || 'Тип не указан'}</strong>Тип постройки</span><span><strong>{brief.length && brief.width ? `${brief.length} × ${brief.width} м` : 'Не указаны'}</strong>Габариты</span><span><strong>{brief.floors || '—'}</strong>Этажей</span><span><strong>{brief.roofShape || '—'}</strong>Кровля</span></div>
+          <p>{Array.isArray(brief.scope) && brief.scope.length ? `Для расчёта: ${brief.scope.join(', ')}.` : 'Состав расчёта пока не выбран.'}</p>
+          {missingBrief.length ? <p className="brief-warning">Для полноценного черновика уточните: {missingBrief.join(', ')}.</p> : <p className="brief-ready">Основные параметры готовы к переносу в калькулятор.</p>}
+          <div className="brief-transfer-actions"><button className="button primary" type="button" onClick={transferToCalculator}><ExternalLink size={16} />Перенести в калькулятор</button><small>Скачается файл анкеты; загрузите его в открывшемся калькуляторе кнопкой «Импортировать заявку клиента».</small></div>
+        </section>
         <section className="client-panel next-step-panel"><div className="client-section-title"><div><CalendarDays size={19} /><h2>Следующее действие</h2></div><span>обязательный шаг по клиенту</span></div>
           <form className="next-step-form" onSubmit={saveNextAction}><label><span>Действие</span><select name="nextAction" defaultValue={lead.nextAction} key={`${lead.id}-${lead.nextAction}`}>{state.clientActions.filter((item) => item.active).map((item) => <option key={item.id}>{item.title}</option>)}{lead.nextAction && !state.clientActions.some((item) => item.title === lead.nextAction) ? <option>{lead.nextAction}</option> : null}</select></label><label><span>Дата и время</span><input name="dueAt" type="datetime-local" defaultValue={lead.dueAt} /></label><button className="button primary">Запланировать</button></form>
           <details className="action-maker"><summary><Plus size={14} />Добавить свой вариант действия</summary><form onSubmit={addAction}><VoiceInput><input aria-label="Новый вариант действия" value={newAction} onChange={(event) => setNewAction(event.target.value)} maxLength={200} required placeholder="Например, запросить фото участка"/></VoiceInput><button className="button" type="submit">Добавить</button></form></details>

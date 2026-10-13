@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS crm_sites (
   actual_start DATE NULL,
   actual_finish DATE NULL,
   construction_notes TEXT NULL,
+  building_brief_json JSON NULL,
   calculator_project_id CHAR(36) NULL,
   calculator_project_number VARCHAR(32) NOT NULL DEFAULT '',
   calculator_revision INT UNSIGNED NULL,

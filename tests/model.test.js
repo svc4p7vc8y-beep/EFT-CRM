@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCommand, createDemoState, validateState } from '../src/app/model.js';
+import { briefFromForm, calculatorBrief } from '../src/app/buildingBrief.js';
 
 test('заказ фиксирует комплектацию и создаёт связанное задание ровно один раз', () => {
   const original = createDemoState();
@@ -55,6 +56,20 @@ test('вопрос требует исполнителя, ответ сохра�
   state = applyCommand(state, 'task.update', { id, question: 'Сколько коробок?' });
   assert.equal(state.tasks[0].answer, '');
   assert.equal(state.tasks[0].question, 'Сколько коробок?');
+});
+test('параметры новой заявки сохраняются на объекте и передаются в анкету калькулятора', () => {
+  const buildingBrief = briefFromForm({ 'brief.buildingType': 'Баня', 'brief.length': '8', 'brief.width': '6', 'brief.floors': '1', 'brief.wallHeight': '2.5', 'brief.wallThickness': '174 мм', 'brief.roofShape': 'Двускатная', 'brief.roofType': 'Тёплая SIP', 'brief.scope.2': 'on', 'brief.scope.5': 'on' });
+  let state = applyCommand(createDemoState(), 'lead.create', { name: 'Учебный клиент', phone: '+70000000000', siteName: 'Баня 8 × 6', nextAction: 'Позвонить', buildingBrief });
+  const lead = state.leads[0]; const site = state.sites.find((item) => item.id === lead.siteId); const client = state.clients.find((item) => item.id === site.clientId);
+  assert.equal(site.buildingBrief.buildingType, 'Баня');
+  const exported = calculatorBrief({ client, site, lead });
+  assert.equal(exported.format, 'eft-client-brief'); assert.equal(exported.schemaVersion, 1);
+  assert.equal(exported.project.length, 8); assert.equal(exported.project.width, 6);
+  assert.equal(exported.sip.wallThickness, '174 мм'); assert.equal(exported.roof.type, 'Тёплая SIP');
+  assert.deepEqual(exported.scope, ['SIP-стены', 'Кровля']);
+  state = applyCommand(state, 'lead.update', { id: lead.id, buildingBrief: { ...buildingBrief, roofShape: 'Плоская' } });
+  assert.equal(state.sites.find((item) => item.id === site.id).buildingBrief.roofShape, 'Плоская');
+  assert.doesNotThrow(() => validateState(state));
 });
 test('сотрудников и бригады можно добавлять, редактировать и сохранять связи', () => {
   let state = applyCommand(createDemoState(), 'employee.save', { name: 'Тестовый электрик', role: 'Электрик', department: 'Монтаж', active: true });

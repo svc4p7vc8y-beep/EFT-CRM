@@ -235,6 +235,7 @@ function crm_schema_ensure_v30(): void {
             'actual_start' => "DATE NULL AFTER planned_finish",
             'actual_finish' => "DATE NULL AFTER actual_start",
             'construction_notes' => "TEXT NULL AFTER actual_finish",
+            'building_brief_json' => "JSON NULL AFTER construction_notes",
         ],
     ];
     foreach ($columns as $table => $definitions) foreach ($definitions as $column => $definition) {
@@ -264,7 +265,8 @@ function crm_public_workspace(): array {
         'status' => $row['construction_status'], 'managerId' => $row['manager_employee_id'] ?: '', 'contractNumber' => $row['contract_number'],
         'plannedStart' => $row['planned_start'] ?: '', 'plannedFinish' => $row['planned_finish'] ?: '', 'actualStart' => $row['actual_start'] ?: '',
         'actualFinish' => $row['actual_finish'] ?: '', 'notes' => $row['construction_notes'] ?: '',
-    ], $db->query('SELECT id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes FROM crm_sites ORDER BY created_at')->fetchAll());
+        'buildingBrief' => json_decode((string)($row['building_brief_json'] ?? '{}'), true) ?: new stdClass(),
+    ], $db->query('SELECT id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, building_brief_json FROM crm_sites ORDER BY created_at')->fetchAll());
     $constructionStages = array_map(static function (array $row): array {
         $dependencies = json_decode((string)($row['dependency_ids_json'] ?? '[]'), true); $comments = json_decode((string)($row['comments_json'] ?? '[]'), true); $attachments = json_decode((string)($row['attachments_json'] ?? '[]'), true);
         return ['id' => $row['id'], 'siteId' => $row['site_id'], 'title' => $row['title'], 'group' => $row['stage_group'], 'status' => $row['stage_status'], 'progress' => (int)$row['progress'],
@@ -536,6 +538,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $previousQuestions[$previousQuestion['task_id']] = (string)$previousQuestion['question'];
             $previousAnswers[$previousQuestion['task_id']] = (string)$previousQuestion['answer'];
         }
+        $previousBriefs = $db->query('SELECT id, building_brief_json FROM crm_sites')->fetchAll(PDO::FETCH_KEY_PAIR);
         $db->exec('DELETE FROM crm_communications');
         $db->exec('DELETE FROM crm_tasks');
         $db->exec('DELETE FROM crm_logistics');
@@ -548,13 +551,20 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         foreach ($clients as $row) $insertClient->execute([
             crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), crm_text($row['source'] ?? '',120), crm_text($row['notes'] ?? '',10000), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
         ]);
-        $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        foreach ($sites as $row) $insertSite->execute([
-            crm_required_text($row['id'] ?? '', 'идентификатор объекта', 36), crm_required_text($row['clientId'] ?? '', 'клиент объекта', 36), crm_required_text($row['name'] ?? '', 'объект', 220), crm_text($row['address'] ?? '', 500),
+        $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, building_brief_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        foreach ($sites as $row) {
+            $siteId = crm_required_text($row['id'] ?? '', 'идентификатор объекта', 36);
+            $brief = $row['buildingBrief'] ?? null;
+            if ($brief !== null && (!is_array($brief) || ($brief !== [] && array_is_list($brief)))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Параметры постройки имеют неверный формат.'], 422);
+            $briefJson = $brief !== null ? json_encode($brief === [] ? new stdClass() : $brief, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) : ($previousBriefs[$siteId] ?? '{}');
+            if (strlen($briefJson) > 30000) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Параметры постройки слишком велики.'], 422);
+            $insertSite->execute([
+            $siteId, crm_required_text($row['clientId'] ?? '', 'клиент объекта', 36), crm_required_text($row['name'] ?? '', 'объект', 220), crm_text($row['address'] ?? '', 500),
             in_array($row['status'] ?? '', ['planning','active','paused','complete'], true) ? $row['status'] : 'planning', isset($employeeIds[crm_text($row['managerId'] ?? '', 36)]) ? crm_text($row['managerId'], 36) : null,
             crm_text($row['contractNumber'] ?? '', 120), ($row['plannedStart'] ?? '') !== '' ? crm_date($row['plannedStart']) : null, ($row['plannedFinish'] ?? '') !== '' ? crm_date($row['plannedFinish']) : null,
-            ($row['actualStart'] ?? '') !== '' ? crm_date($row['actualStart']) : null, ($row['actualFinish'] ?? '') !== '' ? crm_date($row['actualFinish']) : null, crm_text($row['notes'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
+            ($row['actualStart'] ?? '') !== '' ? crm_date($row['actualStart']) : null, ($row['actualFinish'] ?? '') !== '' ? crm_date($row['actualFinish']) : null, crm_text($row['notes'] ?? '', 10000), $briefJson, crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
         ]);
+        }
         $siteIds = array_fill_keys(array_column($sites, 'id'), true); $crewIds = array_fill_keys($db->query('SELECT id FROM crm_crews')->fetchAll(PDO::FETCH_COLUMN), true);
         $insertStage = $db->prepare('INSERT INTO crm_construction_stages (id, site_id, title, stage_group, stage_status, progress, planned_start, planned_finish, actual_start, actual_finish, assignee_id, crew_id, dependency_ids_json, notes, block_reason, comments_json, attachments_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($constructionStages as $row) {

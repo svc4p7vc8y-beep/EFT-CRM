@@ -1,4 +1,5 @@
 import { extendWorkspace, applyOperation, INVENTORY_ACTIONS, validateInventoryOperations, validateOperations } from './operations.js';
+import { normalizeBuildingBrief } from './buildingBrief.js';
 export const STORAGE_KEY = 'eft-crm.workspace.v1';
 export const EMPLOYEE_AVATARS = Array.from({ length: 15 }, (_, index) => `./avatars/employee-${String(index + 1).padStart(2, '0')}.jpg`);
 export const EMPLOYEES = [
@@ -95,7 +96,7 @@ export function applyCommand(current, action, payload = {}) {
   else if (action === 'lead.create') {
     let client = state.clients.find((c) => c.id === payload.clientId);
     if (!client) { client = { id: uid(), name: requireText(payload.name, 'Клиент'), phone: text(payload.phone, 60), email: text(payload.email, 200) }; state.clients.push(client); }
-    const site = { id: uid(), clientId: client.id, name: requireText(payload.siteName, 'Объект'), address: text(payload.address, 500) };
+    const site = { id: uid(), clientId: client.id, name: requireText(payload.siteName, 'Объект'), address: text(payload.address, 500), buildingBrief: normalizeBuildingBrief(payload.buildingBrief) };
     state.sites.push(site);
     const lead = { id: uid(), siteId: site.id, status: 'new', ownerId: payload.ownerId || 'manager-1', nextAction: requireText(payload.nextAction, 'Следующий шаг'), dueAt: validDue(payload.dueAt), source: text(payload.source, 100) || 'Вручную', notes: text(payload.notes), createdAt: new Date().toISOString() };
     state.leads.unshift(lead); log(state, site.id, 'Создана заявка');
@@ -105,6 +106,7 @@ export function applyCommand(current, action, payload = {}) {
     const oldStatus = lead.status;
     for (const key of ['status', 'ownerId', 'nextAction', 'notes']) if (payload[key] !== undefined) lead[key] = text(payload[key]);
     if (payload.dueAt !== undefined) lead.dueAt = validDue(payload.dueAt);
+    if (payload.buildingBrief !== undefined) { const site = state.sites.find((item) => item.id === lead.siteId); if (site) site.buildingBrief = normalizeBuildingBrief(payload.buildingBrief); }
     log(state, lead.siteId, oldStatus !== lead.status ? `Этап заявки: ${LEAD_STAGES.find((s) => s.id === lead.status).label}` : 'Обновлены данные заявки');
   } else if (action === 'client.update') {
     const client = state.clients.find((v) => v.id === payload.id); if (!client) throw new Error('Клиент не найден');
@@ -244,7 +246,7 @@ export function validateState(state) {
   const has = (table, id) => state[table].some((r) => r.id === id);
   if (!Array.isArray(state.employees) || state.employees.length > 20000 || state.employees.some((p) => !p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name || typeof p.role !== 'string' || !p.role.trim() || p.role.length > 120 || typeof p.phone !== 'string' || typeof p.email !== 'string' || typeof p.department !== 'string' || typeof p.notes !== 'string' || typeof p.active !== 'boolean' || typeof p.avatar !== 'string' || !EMPLOYEE_AVATARS.includes(p.avatar) || !['hours','days'].includes(p.attendanceMode) || !Number.isFinite(p.payRate) || p.payRate < 0 || !Number.isFinite(p.advanceAmount) || p.advanceAmount < 0) || new Set(state.employees.map((p) => p.id)).size !== state.employees.length) throw new Error('Некорректный список сотрудников');
   if (!Array.isArray(state.crews) || state.crews.length > 20000 || state.crews.some((c) => !c || typeof c.id !== 'string' || !c.id || typeof c.name !== 'string' || !c.name || typeof c.specialty !== 'string' || typeof c.phone !== 'string' || typeof c.notes !== 'string' || typeof c.active !== 'boolean' || !Array.isArray(c.memberIds) || c.memberIds.some((id) => !has('employees', id)) || (c.leadId && (!has('employees', c.leadId) || !c.memberIds.includes(c.leadId))))) throw new Error('Некорректный список бригад');
-  if (state.sites.some((s) => !has('clients', s.clientId)) || state.leads.some((l) => !has('sites', l.siteId) || (l.ownerId && !has('employees', l.ownerId)) || !LEAD_STAGES.some((v) => v.id === l.status)) || state.orders.some((o) => !has('sites', o.siteId) || (o.leadId && !has('leads', o.leadId)))) throw new Error('Нарушены связи клиентов, заявок и заказов');
+  if (state.sites.some((s) => !has('clients', s.clientId) || (s.buildingBrief !== undefined && (typeof s.buildingBrief !== 'object' || s.buildingBrief === null || Array.isArray(s.buildingBrief)))) || state.leads.some((l) => !has('sites', l.siteId) || (l.ownerId && !has('employees', l.ownerId)) || !LEAD_STAGES.some((v) => v.id === l.status)) || state.orders.some((o) => !has('sites', o.siteId) || (o.leadId && !has('leads', o.leadId)))) throw new Error('Нарушены связи клиентов, заявок и заказов');
   if (!Array.isArray(state.constructionStages) || state.constructionStages.length > 50000 || state.constructionStages.some((stage) => !stage || typeof stage.id !== 'string' || !stage.id || !has('sites', stage.siteId) || typeof stage.title !== 'string' || !stage.title || typeof stage.group !== 'string' || !CONSTRUCTION_STATUSES.some((value) => value.id === stage.status) || !Number.isFinite(stage.progress) || stage.progress < 0 || stage.progress > 100 || !Array.isArray(stage.dependencyIds) || stage.dependencyIds.some((id) => !state.constructionStages.some((value) => value.id === id && value.siteId === stage.siteId)) || !Array.isArray(stage.comments) || !Array.isArray(stage.attachments))) throw new Error('Некорректный план строительства');
   for (const lead of state.leads) validDue(lead.dueAt);
   for (const task of state.tasks) {
