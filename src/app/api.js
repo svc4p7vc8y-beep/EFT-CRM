@@ -86,7 +86,7 @@ export const crmApi = {
   chatMessages: (threadId, before = '') => request('chat.messages', { query: { threadId, before } }),
   chatCreate: (type, userIds = [], title = '', contextId = '') => request('chat.create', { method: 'POST', body: { type, userIds, title, contextId } }),
   chatSend: (threadId, body) => request('chat.send', { method: 'POST', body: { threadId, body } }),
-  chatRead: (threadId) => request('chat.read', { method: 'POST', body: { threadId } }),
+  chatRead: (threadId, messageId) => request('chat.read', { method: 'POST', body: { threadId, messageId } }),
   answerTask: (taskId, answer) => request('tasks.answer', { method: 'POST', body: { taskId, answer } }),
   createTask: (task) => request('tasks.create', { method: 'POST', body: { task } }),
   saveWorkspace: (workspace, baseRevision, initialize = false) => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize } }),

@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bell, MessageCircle, Plus, Send, Users } from 'lucide-react';
+import { ArrowLeft, Bell, Check, CheckCheck, MessageCircle, Plus, Send, Users } from 'lucide-react';
 import { Dialog, PageHeading, VoiceInput } from '../components/UI.jsx';
 import { demoChatApi } from './chatDemo.js';
 import './internal-chat.css';
 
 const typeNames = { all: 'Всем сотрудникам', group: 'Группа', direct: 'Личный чат', task: 'Задача', lead: 'Заявка' };
 const stamp = (value) => value ? new Date(value.replace(' ', 'T')).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+
+function MessageReceipt({ messageId, currentUserId, receipts }) {
+  const peers = receipts.filter((receipt) => String(receipt.userId) !== currentUserId);
+  const delivered = peers.filter((receipt) => receipt.deliveredId >= messageId).length;
+  const read = peers.filter((receipt) => receipt.readId >= messageId).length;
+  const label = peers.length === 1 ? read ? 'Прочитано' : delivered ? 'Доставлено в CRM' : 'Отправлено'
+    : peers.length ? `Доставлено ${delivered}/${peers.length} · прочитано ${read}/${peers.length}` : 'Отправлено';
+  return <details className={`chat-receipt ${read ? 'has-read' : ''}`}><summary>{read || delivered ? <CheckCheck size={14} /> : <Check size={14} />}{label}</summary>
+    {peers.length ? <div className="chat-receipt-details">{peers.map((receipt) => <span key={receipt.userId}>{receipt.name} — {receipt.readId >= messageId ? 'прочитано' : receipt.deliveredId >= messageId ? 'доставлено в CRM' : 'ожидает входа'}</span>)}</div>
+      : <div className="chat-receipt-details">Других активных участников пока нет.</div>}</details>;
+}
 
 export function InternalChat({ runtime, employees, requestedThreadId = '', context, onContextConsumed, onSelectThread, onOpenContext }) {
   const demo = useMemo(() => demoChatApi(employees), [employees]);
@@ -15,6 +26,7 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [threads, setThreads] = useState([]);
   const [selectedId, setSelectedId] = useState(requestedThreadId);
   const [messages, setMessages] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
   const [filter, setFilter] = useState('');
@@ -26,8 +38,25 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [mobileThread, setMobileThread] = useState(Boolean(requestedThreadId));
   const messagesRef = useRef(null);
   const loadedOlder = useRef(false);
+  const lastReadRef = useRef({ threadId: '', messageId: 0 });
+  const pendingReadRef = useRef({ threadId: '', messageId: 0 });
   const currentUserId = String(api.user?.id || 'me');
   const selected = threads.find((thread) => thread.id === selectedId);
+
+  function readVisibleMessages() {
+    const pending = pendingReadRef.current;
+    const list = messagesRef.current;
+    if (!list || pending.threadId !== selectedId || !pending.messageId || document.visibilityState === 'hidden') return;
+    if (window.matchMedia('(max-width: 760px)').matches && !mobileThread) return;
+    if (list.scrollHeight - list.scrollTop - list.clientHeight > 90) return;
+    if (lastReadRef.current.threadId === selectedId && lastReadRef.current.messageId >= pending.messageId) return;
+    const previous = lastReadRef.current;
+    lastReadRef.current = pending;
+    apiRef.current.chatRead(selectedId, pending.messageId).catch((failure) => {
+      if (lastReadRef.current === pending) lastReadRef.current = previous;
+      setError(failure.message);
+    });
+  }
 
   async function loadThreads() {
     const result = await apiRef.current.chatList();
@@ -51,24 +80,33 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   useEffect(() => {
     if (!selectedId) return undefined;
     let active = true;
-    setMessages([]); setHasMore(false); loadedOlder.current = false;
+    setMessages([]); setReceipts([]); setHasMore(false); loadedOlder.current = false;
     const refresh = async () => {
       if (document.visibilityState === 'hidden') return;
+      if (window.matchMedia('(max-width: 760px)').matches && !mobileThread) return;
       try {
         const result = await apiRef.current.chatMessages(selectedId);
         if (!active) return;
+        const list = messagesRef.current;
+        const wasAtBottom = !list || list.scrollHeight - list.scrollTop - list.clientHeight <= 90;
+        setReceipts(result.receipts || []);
         setMessages((previous) => {
           const byId = new Map(previous.map((message) => [message.id, message]));
           result.messages.forEach((message) => byId.set(message.id, message));
           return [...byId.values()].sort((a, b) => a.id - b.id);
         });
         if (!loadedOlder.current) setHasMore(Boolean(result.hasMore));
-        await apiRef.current.chatRead(selectedId);
+        const latestId = result.messages.at(-1)?.id || 0;
+        pendingReadRef.current = { threadId: selectedId, messageId: latestId };
+        requestAnimationFrame(() => { if (active && wasAtBottom && messagesRef.current) {
+          messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+          readVisibleMessages();
+        } });
       } catch (failure) { if (active) setError(failure.message); }
     };
     refresh(); const timer = window.setInterval(refresh, 6000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [selectedId]);
+  }, [selectedId, mobileThread]);
 
   function selectThread(id) {
     setSelectedId(id); setMobileThread(true); setError('');
@@ -119,9 +157,9 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
         <div className="chat-thread-items">{filteredThreads.map((thread) => <button key={thread.id} className={`chat-thread-item ${selectedId === thread.id ? 'active' : ''}`} onClick={() => selectThread(thread.id)}><span className="chat-thread-avatar">{thread.type === 'all' || thread.type === 'group' ? <Users size={20} /> : <MessageCircle size={20} />}</span><span className="chat-thread-copy"><strong>{thread.title}</strong><small>{typeNames[thread.type]} · {thread.memberIds?.length || 0} участников</small><span>{thread.lastBody || 'Начните разговор'}</span></span>{thread.unread ? <b className="chat-unread">{thread.unread}</b> : null}</button>)}{!filteredThreads.length ? <p className="chat-empty-list">Чаты не найдены.</p> : null}</div>
       </aside>
       <div className="chat-conversation">{selected ? <><header className="chat-conversation-head"><button className="icon-button chat-back" aria-label="К списку чатов" onClick={() => setMobileThread(false)}><ArrowLeft size={21} /></button><div><strong>{selected.title}</strong><span>{selected.type === 'all' ? `Все пользователи CRM · ${selected.memberIds.length}` : memberNames.length ? memberNames.join(', ') : typeNames[selected.type]}</span></div>{selected.contextId ? <button className="button chat-context-link" onClick={() => onOpenContext(selected.type, selected.contextId)}>Открыть {selected.type === 'task' ? 'задачу' : 'заявку'}</button> : null}</header>
-        <div className="chat-message-list" ref={messagesRef}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong><p>{message.body}</p><time>{stamp(message.createdAt)}</time></article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
+        <div className="chat-message-list" ref={messagesRef} onScroll={readVisibleMessages}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong><p>{message.body}</p><time>{stamp(message.createdAt)}</time>{String(message.authorId) === currentUserId ? <MessageReceipt messageId={message.id} currentUserId={currentUserId} receipts={receipts} /> : null}</article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
         <form className="chat-compose" onSubmit={submitMessage}><VoiceInput><textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={5000} rows={2} placeholder="Сообщение участникам…" aria-label="Текст сообщения" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></VoiceInput><button className="button primary" type="submit" disabled={sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={19} /><span>{sending ? 'Отправляем…' : 'Отправить'}</span></button></form>
-        <p className="chat-delivery-hint"><Bell size={13} />{selected.type === 'all' ? 'Уведомление получат все активные пользователи CRM.' : 'Уведомление получат выбранные участники.'} Push приходит на устройствах, где он включён.</p>
+        <p className="chat-delivery-hint"><Bell size={13} />Доставка отмечается при получении чатов в CRM, прочтение — при открытии диалога. Push сам по себе не означает прочтение.</p>
       </> : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Выберите чат</strong></div>}</div>
     </div>
     {error && !create ? <p className="chat-error" role="alert">{error}</p> : null}

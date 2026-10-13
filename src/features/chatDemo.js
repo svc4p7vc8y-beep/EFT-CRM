@@ -22,8 +22,12 @@ export function demoChatApi(employees) {
   return {
     mode: 'demo', user: { id: 'me', displayName: 'Вы (демо)' }, chatList: list,
     chatMessages: async (threadId, before = '') => {
-      const messages = read().messages.filter((message) => message.threadId === threadId && (!before || message.id < Number(before)));
-      return { messages: messages.slice(-100), hasMore: messages.length > 100 };
+      const data = read();
+      const messages = data.messages.filter((message) => message.threadId === threadId && (!before || message.id < Number(before)));
+      const thread = data.threads.find((item) => item.id === threadId);
+      const participants = thread?.type === 'all' ? users : users.filter((user) => thread?.memberIds.includes(user.id));
+      return { messages: messages.slice(-100), hasMore: messages.length > 100,
+        receipts: participants.map((user) => ({ userId: user.id, name: user.name, deliveredId: user.id === 'me' ? messages.at(-1)?.id || 0 : 0, readId: user.id === 'me' ? messages.at(-1)?.id || 0 : 0 })) };
     },
     chatCreate: async (type, userIds = [], title = '', contextId = '') => {
       const data = read();

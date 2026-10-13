@@ -29,6 +29,11 @@
 .chat-message strong{display:block;margin-bottom:4px;font-size:11px;color:#4d7847}
 .chat-message p{white-space:pre-wrap;font-size:13px;line-height:1.45}
 .chat-message time{display:block;margin-top:7px;text-align:right;color:#738b78;font-size:10px}
+.chat-receipt{position:relative;margin-top:5px;color:#68806f;font-size:10px}
+.chat-receipt.has-read{color:#197d8f}
+.chat-receipt summary{display:flex;align-items:center;justify-content:flex-end;gap:4px;cursor:pointer;list-style:none}
+.chat-receipt summary::-webkit-details-marker{display:none}
+.chat-receipt-details{display:grid;gap:5px;min-width:180px;margin-top:6px;padding:8px 10px;border:1px solid #d4e3d4;border-radius:7px;background:var(--surface,#fff);color:var(--navy);font-size:11px;line-height:1.35}
 .chat-older{align-self:center;font-size:11px;min-height:32px}
 .chat-empty-conversation{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:150px;color:#6d8274;text-align:center}
 .chat-empty-conversation strong{color:#314d37;font-size:15px}.chat-empty-conversation span{font-size:12px}

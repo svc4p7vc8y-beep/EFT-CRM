@@ -237,10 +237,15 @@ function crm_schema_ensure_v30(): void {
             'construction_notes' => "TEXT NULL AFTER actual_finish",
             'building_brief_json' => "JSON NULL AFTER construction_notes",
         ],
+        'crm_chat_members' => [
+            'last_delivered_id' => 'BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id',
+        ],
     ];
+    $backfillChatDelivery = !crm_column_exists('crm_chat_members', 'last_delivered_id');
     foreach ($columns as $table => $definitions) foreach ($definitions as $column => $definition) {
         if (!crm_column_exists($table, $column)) $db->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
     }
+    if ($backfillChatDelivery) $db->exec('UPDATE crm_chat_members SET last_delivered_id=last_read_id');
     foreach (['workspace_revision' => '0', 'workspace_initialized' => '0', 'inventory_revision' => '0', 'inventory_initialized' => '0'] as $key => $value) {
         $statement = $db->prepare('INSERT IGNORE INTO crm_settings (setting_key, setting_value) VALUES (?, ?)');
         $statement->execute([$key, $value]);

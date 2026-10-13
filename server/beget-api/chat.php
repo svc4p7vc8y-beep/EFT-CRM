@@ -72,13 +72,15 @@ function crm_chat_handle(string $action, string $method): void {
         crm_chat_all_thread();
         $users = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => $row['display_name'], 'employeeId' => $row['employee_id'] ?: ''],
             $db->query('SELECT id, display_name, employee_id FROM crm_users WHERE active=1 ORDER BY display_name')->fetchAll());
-        $statement = $db->prepare("SELECT t.id, t.thread_type, t.title, t.context_id, t.updated_at, COALESCE(m.last_read_id,0) AS last_read_id,
+        $statement = $db->prepare("SELECT t.id, t.thread_type, t.title, t.context_id, t.updated_at, COALESCE(m.last_read_id,0) AS last_read_id, COALESCE(m.last_delivered_id,0) AS last_delivered_id,
             (SELECT body FROM crm_chat_messages x WHERE x.thread_id=t.id ORDER BY x.id DESC LIMIT 1) AS last_body,
             (SELECT MAX(x.id) FROM crm_chat_messages x WHERE x.thread_id=t.id) AS last_message_id,
             (SELECT COUNT(*) FROM crm_chat_messages x WHERE x.thread_id=t.id AND x.id>COALESCE(m.last_read_id,0) AND (x.author_user_id IS NULL OR x.author_user_id<>?)) AS unread
             FROM crm_chat_threads t LEFT JOIN crm_chat_members m ON m.thread_id=t.id AND m.user_id=?
             WHERE t.thread_type='all' OR m.user_id IS NOT NULL ORDER BY t.updated_at DESC LIMIT 200");
         $statement->execute([$userId, $userId]); $rows = $statement->fetchAll();
+        $markDelivered = $db->prepare('INSERT INTO crm_chat_members (thread_id, user_id, last_delivered_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_delivered_id=GREATEST(last_delivered_id, VALUES(last_delivered_id))');
+        foreach ($rows as $row) if ((int)$row['last_message_id'] > (int)$row['last_delivered_id']) $markDelivered->execute([$row['id'], $userId, (int)$row['last_message_id']]);
         $ids = array_column($rows, 'id'); $members = [];
         if ($ids) {
             $marks = implode(',', array_fill(0, count($ids), '?'));
@@ -95,12 +97,18 @@ function crm_chat_handle(string $action, string $method): void {
         crm_json(['ok' => true, 'users' => $users, 'threads' => $threads]);
     }
     if ($action === 'chat.messages' && $method === 'GET') {
-        $threadId = (string)($_GET['threadId'] ?? ''); crm_chat_thread($threadId, $user);
+        $threadId = (string)($_GET['threadId'] ?? ''); $thread = crm_chat_thread($threadId, $user);
         $before = filter_var($_GET['before'] ?? null, FILTER_VALIDATE_INT);
         $statement = $db->prepare('SELECT m.id, m.thread_id, m.author_user_id, m.body, m.created_at, u.display_name FROM crm_chat_messages m LEFT JOIN crm_users u ON u.id=m.author_user_id WHERE m.thread_id=?' . ($before && $before > 0 ? ' AND m.id<?' : '') . ' ORDER BY m.id DESC LIMIT 101');
         $statement->execute($before && $before > 0 ? [$threadId, $before] : [$threadId]);
         $rows = $statement->fetchAll(); $hasMore = count($rows) > 100;
-        crm_json(['ok' => true, 'messages' => array_map('crm_chat_public_message', array_reverse(array_slice($rows, 0, 100))), 'hasMore' => $hasMore]);
+        $receipts = $db->prepare($thread['thread_type'] === 'all'
+            ? 'SELECT u.id AS user_id, u.display_name, COALESCE(m.last_delivered_id,0) AS last_delivered_id, COALESCE(m.last_read_id,0) AS last_read_id FROM crm_users u LEFT JOIN crm_chat_members m ON m.user_id=u.id AND m.thread_id=? WHERE u.active=1 ORDER BY u.display_name'
+            : 'SELECT u.id AS user_id, u.display_name, m.last_delivered_id, m.last_read_id FROM crm_chat_members m JOIN crm_users u ON u.id=m.user_id AND u.active=1 WHERE m.thread_id=? ORDER BY u.display_name');
+        $receipts->execute([$threadId]);
+        crm_json(['ok' => true, 'messages' => array_map('crm_chat_public_message', array_reverse(array_slice($rows, 0, 100))), 'hasMore' => $hasMore,
+            'receipts' => array_map(static fn(array $row): array => ['userId' => (int)$row['user_id'], 'name' => $row['display_name'],
+                'deliveredId' => (int)$row['last_delivered_id'], 'readId' => (int)$row['last_read_id']], $receipts->fetchAll())]);
     }
     if ($action === 'chat.create' && $method === 'POST') {
         crm_require_origin(); crm_csrf(); $input = crm_input(12000);
@@ -147,8 +155,8 @@ function crm_chat_handle(string $action, string $method): void {
             $db->prepare('INSERT INTO crm_chat_messages (thread_id, author_user_id, body) VALUES (?, ?, ?)')->execute([$threadId, $userId, $body]);
             $messageId = (int)$db->lastInsertId();
             $db->prepare('UPDATE crm_chat_threads SET updated_at=NOW() WHERE id=?')->execute([$threadId]);
-            $member = $db->prepare('INSERT INTO crm_chat_members (thread_id, user_id, last_read_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_read_id=GREATEST(last_read_id, VALUES(last_read_id))');
-            $member->execute([$threadId, $userId, $messageId]);
+            $member = $db->prepare('INSERT INTO crm_chat_members (thread_id, user_id, last_delivered_id, last_read_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_delivered_id=GREATEST(last_delivered_id, VALUES(last_delivered_id)), last_read_id=GREATEST(last_read_id, VALUES(last_read_id))');
+            $member->execute([$threadId, $userId, $messageId, $messageId]);
             $recipients = $thread['thread_type'] === 'all'
                 ? $db->query('SELECT id FROM crm_users WHERE active=1')->fetchAll(PDO::FETCH_COLUMN)
                 : ($db->prepare('SELECT u.id FROM crm_chat_members m JOIN crm_users u ON u.id=m.user_id AND u.active=1 WHERE m.thread_id=?'));
@@ -167,9 +175,12 @@ function crm_chat_handle(string $action, string $method): void {
         crm_require_origin(); crm_csrf(); $input = crm_input(2048);
         $threadId = crm_required_text($input['threadId'] ?? '', 'чат', 36);
         crm_chat_thread($threadId, $user);
-        $statement = $db->prepare('SELECT COALESCE(MAX(id),0) FROM crm_chat_messages WHERE thread_id=?'); $statement->execute([$threadId]);
+        $messageId = filter_var($input['messageId'] ?? null, FILTER_VALIDATE_INT);
+        if ($messageId === false || $messageId < 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сообщение не найдено.'], 422);
+        $statement = $db->prepare('SELECT id FROM crm_chat_messages WHERE thread_id=? AND id=?'); $statement->execute([$threadId, $messageId]);
         $latest = (int)$statement->fetchColumn();
-        $db->prepare('INSERT INTO crm_chat_members (thread_id, user_id, last_read_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_read_id=GREATEST(last_read_id, VALUES(last_read_id))')->execute([$threadId, $userId, $latest]);
+        if (!$latest) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Сообщение не найдено.'], 404);
+        $db->prepare('INSERT INTO crm_chat_members (thread_id, user_id, last_delivered_id, last_read_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_delivered_id=GREATEST(last_delivered_id, VALUES(last_delivered_id)), last_read_id=GREATEST(last_read_id, VALUES(last_read_id))')->execute([$threadId, $userId, $latest, $latest]);
         $db->prepare('UPDATE crm_notifications SET read_at=COALESCE(read_at,NOW()) WHERE user_id=? AND target_path=? AND read_at IS NULL')->execute([$userId, '#chat/' . $threadId]);
         crm_json(['ok' => true, 'lastReadId' => $latest]);
     }

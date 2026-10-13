@@ -501,6 +501,7 @@ CREATE TABLE IF NOT EXISTS crm_chat_threads (
 CREATE TABLE IF NOT EXISTS crm_chat_members (
   thread_id CHAR(36) NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
+  last_delivered_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
   last_read_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
   joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (thread_id, user_id),
