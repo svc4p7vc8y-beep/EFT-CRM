@@ -1,4 +1,4 @@
-.mobile-search-toggle,.mobile-bottom-nav{display:none}
+.mobile-search-toggle,.mobile-bottom-nav,.mobile-top-logo{display:none}
 .mobile-thread-back{display:none}
 :root[data-theme="dark"] .mobile-bottom-nav,:root[data-theme="dark"] .dialog-actions,:root[data-theme="dark"] .leads-page .leads-table tr{background:#16222b;color:#e5edf2;border-color:#33434f}
 
@@ -9,16 +9,18 @@
   .workspace{width:100%;min-width:0;margin-left:0}
   .workspace-body{display:block;min-width:0;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
   .page{width:100%;min-width:0;padding:18px 14px 28px}
-  .topbar{height:60px;padding:0 14px;gap:8px;box-shadow:0 2px 12px #152b3b0b}
+  .topbar{height:60px;width:100%;min-width:0;padding:0 10px;gap:6px;box-shadow:0 2px 12px #152b3b0b}
   .topbar .release-badge{position:static;order:1;flex:0 0 auto;margin:0;padding:3px 6px;font-size:10px}
-  .topbar .mobile-menu{display:inline-flex;order:0;width:38px;height:38px}
-  .topbar-clock{order:2;margin-right:auto;min-width:0;border:0;background:transparent!important;padding:0 3px;gap:0}
+  .topbar .mobile-top-logo{display:grid;place-items:center;order:0;flex:0 0 56px;width:56px;height:42px;padding:0;border:0;border-radius:8px;background:#0b0d0e;overflow:hidden}
+  .mobile-top-logo img{display:block;width:100%;height:100%;object-fit:contain}
+  .topbar-clock{order:2;margin-right:auto;min-width:0;border:0;background:transparent!important;padding:0 2px;gap:0}
   .topbar-clock strong{font-size:14px;line-height:1.2}
   .topbar-clock span{font-size:10px;line-height:1.2}
-  .topbar .theme-switcher{display:none}
-  .mobile-search-toggle{display:inline-flex;order:3;width:38px;height:38px}
-  .notification-button{order:4;width:38px;height:38px}
-  .topbar .profile-button{display:flex;order:5;padding:0;border:0}
+  .topbar .theme-switcher{display:block;order:3;margin-left:0;flex:0 0 36px}
+  .topbar .theme-switcher>summary{width:36px;height:36px}
+  .mobile-search-toggle{display:inline-flex;order:4;width:36px;height:36px}
+  .notification-button{order:5;width:36px;height:36px}
+  .topbar .profile-button{display:flex;order:6;padding:0;border:0}
   .profile-button .profile-avatar{width:34px;height:34px}
   .profile-button>span:nth-child(2),.profile-button>svg{display:none}
   .topbar .global-search{display:none}
@@ -26,9 +28,12 @@
   .topbar.mobile-search-open .global-search{display:flex;position:absolute;top:60px;left:0;right:0;height:55px;padding:6px 14px;z-index:16;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:0 5px 12px #152b3b0b}
   .topbar.mobile-search-open .global-search input{font-size:16px}
   .topbar.mobile-search-open .global-search input::placeholder{color:#7d8ea3}
-  .mobile-bottom-nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;bottom:0;left:0;width:100vw;z-index:30;height:calc(64px + env(safe-area-inset-bottom));padding:3px 5px env(safe-area-inset-bottom);border-top:1px solid var(--line);background:var(--surface,#fff);box-shadow:0 -5px 18px #142b3b14}
+  .mobile-bottom-nav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;bottom:0;left:0;right:0;width:100%;z-index:30;height:calc(64px + env(safe-area-inset-bottom));padding:3px max(5px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(5px,env(safe-area-inset-left));border-top:1px solid var(--line);background:var(--surface,#fff);box-shadow:0 -5px 18px #142b3b14}
   .mobile-bottom-nav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:54px;padding:5px 0;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:10px;line-height:1.2}
   .mobile-bottom-nav button.active{color:var(--teal);background:color-mix(in srgb,var(--teal) 9%,transparent);font-weight:700}
+  .mobile-bottom-nav .mobile-more-button{background:#253127;color:#fff;font-weight:700;border-radius:10px}
+  .mobile-bottom-nav .mobile-more-button.active,.mobile-bottom-nav .mobile-more-button:hover{background:#36522f;color:#fff}
+  .mobile-more-mark{width:27px;height:24px;flex:none}
   .mobile-bottom-nav i{position:absolute;top:0;left:calc(50% + 9px);min-width:17px;height:17px;padding:2px 3px;border-radius:10px;background:#d84e43;color:#fff;font-size:9px;font-style:normal;line-height:13px}
   .sidebar{width:min(315px,86vw);z-index:36;box-shadow:15px 0 30px #0002;transform:translateX(-100%);transition:transform .18s ease}
   .sidebar.is-open{transform:translateX(0)}
@@ -51,6 +56,9 @@
 }
 
 @media(max-width:480px){
+  .topbar .release-badge{display:none}
+  .topbar-clock strong{font-size:12px}
+  .topbar-clock span{font-size:9px}
   .page-heading{align-items:flex-start;flex-wrap:wrap}
   .page-heading>div{width:100%}
   .page-heading>.button,.page-heading>button{margin-left:0}
@@ -91,6 +99,15 @@
   .month-cells button>strong{margin:auto}
   .month-cells button small{display:block;text-align:center}
   .communications-page .connector-panel{margin-top:0}
+}
+
+@media(max-width:350px){
+  .topbar{gap:3px;padding-inline:6px}
+  .topbar .mobile-top-logo{flex-basis:48px;width:48px;height:40px}
+  .topbar .theme-switcher{flex-basis:32px}
+  .topbar .theme-switcher>summary,.mobile-search-toggle,.notification-button{width:32px;height:34px}
+  .topbar-clock span{font-size:8px}
+  .topbar .profile-avatar{width:30px;height:30px}
 }
 
 @media(max-width:560px){
