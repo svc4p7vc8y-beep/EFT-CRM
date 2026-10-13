@@ -482,6 +482,45 @@ CREATE TABLE IF NOT EXISTS crm_notifications (
   CONSTRAINT fk_crm_notifications_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_chat_threads (
+  id CHAR(36) NOT NULL,
+  thread_type ENUM('all','group','direct','task','lead') NOT NULL,
+  title VARCHAR(180) NOT NULL,
+  context_id CHAR(36) NULL,
+  direct_key VARCHAR(120) NULL,
+  created_by BIGINT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_crm_chat_direct (direct_key),
+  UNIQUE KEY uq_crm_chat_context (thread_type, context_id),
+  KEY idx_crm_chat_updated (updated_at),
+  CONSTRAINT fk_crm_chat_creator FOREIGN KEY (created_by) REFERENCES crm_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_chat_members (
+  thread_id CHAR(36) NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  last_read_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (thread_id, user_id),
+  KEY idx_crm_chat_member_user (user_id),
+  CONSTRAINT fk_crm_chat_member_thread FOREIGN KEY (thread_id) REFERENCES crm_chat_threads(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_chat_member_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_chat_messages (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  thread_id CHAR(36) NOT NULL,
+  author_user_id BIGINT UNSIGNED NULL,
+  body TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_crm_chat_messages_thread (thread_id, id),
+  CONSTRAINT fk_crm_chat_message_thread FOREIGN KEY (thread_id) REFERENCES crm_chat_threads(id) ON DELETE CASCADE,
+  CONSTRAINT fk_crm_chat_message_author FOREIGN KEY (author_user_id) REFERENCES crm_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Kept separately because workspace saves rebuild crm_tasks in one transaction.
 CREATE TABLE IF NOT EXISTS crm_task_questions (
   task_id CHAR(36) NOT NULL PRIMARY KEY,

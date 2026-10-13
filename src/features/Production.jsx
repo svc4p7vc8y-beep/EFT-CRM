@@ -14,7 +14,7 @@ export function Production({ state, search, onCreate, onOpen, onMove, initialOrd
     {!mine ? <section className="workload"><h2>Загрузка на сегодня</h2><div className="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Задач на сегодня</th><th>Состояние работ</th><th>Текущая задача</th></tr></thead><tbody>{state.employees.filter((p) => p.active && (mine || p.role === 'Цех')).map((p) => { const items = state.tasks.filter((t) => t.assigneeId === p.id && t.dueAt.slice(0, 10) === dateKey() && t.status !== 'done'); const active = items.find((t) => t.status === 'doing') || items[0]; return <tr key={p.id}><td><span className="person-cell"><Avatar id={p.id} state={state} />{p.name}</span></td><td>{items.length}</td><td>{items.some((t) => t.status === 'blocked') ? <Badge color="amber">Есть блокировка</Badge> : items.length ? <Badge color="blue">Есть задания</Badge> : <span className="muted">Свободен</span>}</td><td>{active ? <button className="text-link" onClick={() => onOpen(active.id)}>{active.title}<ArrowRight size={14} /></button> : '—'}</td></tr>; })}</tbody></table></div></section> : null}<div className="page-footnote">Перемещайте карточки между колонками или меняйте статус внутри задания.</div>
   </section>;
 }
-export function TaskDetail({ state, task, onEdit, onCheck, onMove, onComment, onAnswer }) {
+export function TaskDetail({ state, task, onEdit, onCheck, onMove, onComment, onAnswer, onChat }) {
   const [check, setCheck] = useState('');
   const [comment, setComment] = useState('');
   const [answer, setAnswer] = useState('');
@@ -30,6 +30,7 @@ export function TaskDetail({ state, task, onEdit, onCheck, onMove, onComment, on
   }
   return <div className="task-detail">
     <div className="task-detail-summary"><Badge stages={TASK_STAGES} value={task.status} /><span>{order?.number || 'Общая задача'}{site ? ` · ${site.name}` : ''}</span>{onEdit ? <button className="text-link" onClick={onEdit}>Редактировать</button> : null}</div>
+    {onChat ? <button className="button task-chat-open" onClick={() => onChat(task.id)}>Открыть чат по задаче</button> : null}
     <p className="preserve-lines">{task.description}</p>
     <div className="task-detail-facts"><span><Avatar id={task.assigneeId} state={state} />{employee(task.assigneeId, state)?.name || 'Не назначен'}</span><span><Clock3 size={16} />{dateLabel(task.dueAt)}</span><span>{task.completedQty} / {task.quantity} {task.unit}</span></div>
     {task.question ? <section className="task-question" aria-label="Вопрос исполнителю"><div className="task-question-head"><h3>Вопрос исполнителю</h3><span className={`task-question-state ${task.answer ? 'answered' : ''}`}>{task.answer ? 'Ответ получен' : 'Ждёт ответа'}</span></div><p className="preserve-lines">{task.question}</p>{task.questionRequesterName ? <small>Спросил: {task.questionRequesterName}</small> : null}

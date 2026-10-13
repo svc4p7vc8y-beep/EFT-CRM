@@ -42,7 +42,7 @@ jobs:
           mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
-          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/mail.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
           cp -R server/beget-api/vendor release/api/vendor
           cp server/beget-api/.htaccess.example release/api/.htaccess
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
+require __DIR__ . '/chat.php';
 
 crm_headers();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
@@ -11,6 +12,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
 
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $action = (string)($_GET['action'] ?? 'health');
+
+if (str_starts_with($action, 'chat.')) crm_chat_handle($action, $method);
 
 if ($action === 'health' && $method === 'GET') {
     crm_db()->query('SELECT 1');

@@ -47,7 +47,7 @@ function crm_push_preferences(int $userId): array {
 }
 
 function crm_push_emit(int $userId, string $kind, string $title, string $body, string $targetPath, string $eventKey): bool {
-    if (!in_array($kind, ['task', 'message', 'reminder'], true) || !preg_match('~^#(?:tasks|task/[A-Za-z0-9_-]{1,36}|communications|client/[A-Za-z0-9%_-]+)$~', $targetPath)) return false;
+    if (!in_array($kind, ['task', 'message', 'reminder'], true) || !preg_match('~^#(?:tasks|task/[A-Za-z0-9_-]{1,36}|communications|client/[A-Za-z0-9%_-]+|chat/[A-Za-z0-9_-]{1,36})$~', $targetPath)) return false;
     $statement = crm_db()->prepare('INSERT IGNORE INTO crm_notifications (user_id, kind, title, body, target_path, event_key) VALUES (?, ?, ?, ?, ?, ?)');
     $statement->execute([$userId, $kind, mb_substr($title, 0, 180), mb_substr($body, 0, 300), $targetPath, mb_substr($eventKey, 0, 190)]);
     return $statement->rowCount() === 1;

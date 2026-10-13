@@ -8,7 +8,7 @@ import '../components/building-brief.css';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
 
-export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, notify }) {
+export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, onChat, notify }) {
   const { client, site } = leadContext(state, lead);
   const [activityType, setActivityType] = useState('call');
   const [activityText, setActivityText] = useState('');
@@ -69,7 +69,7 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
     <button className="client-back" onClick={onBack}><ArrowLeft size={17} />Назад к списку</button>
     <header className="client-header">
       <div><div className="client-title-line"><h1>{client.name}</h1><Badge value={lead.status} stages={LEAD_STAGES} /></div><p>{site.name} · заявка от {dateLabel(lead.createdAt)}</p></div>
-      <div className="client-header-actions">{client.phone ? <CallLink phone={client.phone} label="Позвонить" className="button" /> : null}<button className="button" onClick={onEditClient}>Контакты и объект</button><button className="button" onClick={onEditLead}>Редактировать заявку</button></div>
+      <div className="client-header-actions">{client.phone ? <CallLink phone={client.phone} label="Позвонить" className="button" /> : null}<button className="button" onClick={onEditClient}>Контакты и объект</button><button className="button" onClick={onEditLead}>Редактировать заявку</button><button className="button" onClick={() => onChat?.(lead.id)}><MessageSquare size={16} />Чат по заявке</button></div>
     </header>
 
     <div className="client-progress" aria-label={`Прогресс заявки ${progress}%`}>

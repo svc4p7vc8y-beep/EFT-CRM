@@ -3,7 +3,7 @@ import { Bell, BellOff, Check, RefreshCw } from 'lucide-react';
 import { disablePush, enablePush, pushAvailable } from '../app/pushClient.js';
 import './notification-center.css';
 
-const kinds = [['task', 'Назначенные задачи'], ['message', 'Сообщения клиентов'], ['reminder', 'Напоминания о сроках']];
+const kinds = [['task', 'Назначенные задачи'], ['message', 'Сообщения клиентов и внутренний чат'], ['reminder', 'Напоминания о сроках']];
 
 export function NotificationCenter({ runtime, late, blocked, onLead, onTask, onOpen, onCount }) {
   const [items, setItems] = useState([]);
