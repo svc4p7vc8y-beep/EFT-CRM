@@ -41,4 +41,16 @@ jobs:
           [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]
           ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
-            "cd '${BEGET_DEPLOY_PATH%/}/api' && php -v && php -d display_errors=1 notifications_cron.php"
+            "bash -s -- '${BEGET_DEPLOY_PATH%/}/api'" <<'REMOTE'
+          set -e
+          cd "$1"
+          for binary in /usr/local/bin/php8.4 /usr/local/bin/php8.3 /usr/local/bin/php8.2 /usr/local/bin/php8.1 /usr/local/php-cgi/8.4/bin/php /usr/local/php-cgi/8.3/bin/php /usr/local/php-cgi/8.2/bin/php /usr/local/php-cgi/8.1/bin/php; do
+            if test -x "$binary"; then
+              "$binary" -r 'exit(PHP_VERSION_ID >= 80100 ? 0 : 1);' || continue
+              "$binary" -d display_errors=1 notifications_cron.php
+              exit 0
+            fi
+          done
+          echo 'PHP 8.1+ CLI interpreter is unavailable on Beget' >&2
+          exit 1
+          REMOTE
