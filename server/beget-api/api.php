@@ -228,6 +228,49 @@ if ($action === 'notifications.test' && $method === 'POST') {
     crm_json(array_merge(['ok' => true, 'sent' => $sent], crm_push_list((int)$user['id'])));
 }
 
+if ($action === 'tasks.create' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    $managesTasks = crm_can($user, 'tasks.manage');
+    if (!$managesTasks && !crm_can($user, 'tasks.self')) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Нет права создавать задачи.'], 403);
+    $input = crm_input(16384); $task = $input['task'] ?? null;
+    if (!is_array($task)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Заполните задачу.'], 422);
+    $title = crm_required_text($task['title'] ?? '', 'название задачи', 250);
+    $description = crm_text($task['description'] ?? '', 20000);
+    $question = crm_text($task['question'] ?? '', 5000);
+    $assignee = crm_text($task['assigneeId'] ?? '', 36);
+    if (!$managesTasks) {
+        if (empty($user['employeeId'])) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Привяжите аккаунт к сотруднику в настройках.'], 403);
+        $assignee = (string)$user['employeeId'];
+    }
+    if ($question !== '' && $assignee === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Для вопроса выберите исполнителя.'], 422);
+    $status = in_array($task['status'] ?? 'planned', ['planned','doing','review','blocked','done'], true) ? $task['status'] : 'planned';
+    $blockReason = crm_text($task['blockReason'] ?? '', 10000);
+    if ($status === 'blocked' && $blockReason === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Укажите причину блокировки.'], 422);
+    if ($status === 'done' && $question !== '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сначала дождитесь ответа на вопрос.'], 422);
+    $quantity = (float)($task['quantity'] ?? 1); $completed = (float)($task['completedQty'] ?? 0);
+    if (!is_finite($quantity) || !is_finite($completed) || $quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
+    if ($status === 'done') $completed = $quantity;
+    $orderId = crm_text($task['orderId'] ?? '', 36); $siteId = crm_text($task['siteId'] ?? '', 36);
+    $crewId = crm_text($task['crewId'] ?? '', 36); $stageId = crm_text($task['constructionStageId'] ?? '', 36);
+    $db = crm_db(); $db->beginTransaction();
+    try {
+        if ($assignee !== '') { $q = $db->prepare('SELECT id FROM crm_employees WHERE id=? AND active=1'); $q->execute([$assignee]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Исполнитель не найден.'], 422); }
+        if ($orderId !== '') { $q = $db->prepare('SELECT site_id FROM crm_orders WHERE id=?'); $q->execute([$orderId]); $orderSite = $q->fetchColumn(); if (!$orderSite || ($siteId !== '' && $siteId !== $orderSite)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Заказ и объект не совпадают.'], 422); $siteId = (string)$orderSite; }
+        if ($siteId !== '') { $q = $db->prepare('SELECT id FROM crm_sites WHERE id=?'); $q->execute([$siteId]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект не найден.'], 422); }
+        if ($crewId !== '') { $q = $db->prepare('SELECT id FROM crm_crews WHERE id=?'); $q->execute([$crewId]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Бригада не найдена.'], 422); }
+        if ($stageId !== '') { $q = $db->prepare('SELECT site_id FROM crm_construction_stages WHERE id=?'); $q->execute([$stageId]); if (!$siteId || $q->fetchColumn() !== $siteId) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Этап не относится к объекту.'], 422); }
+        $taskId = crm_uuid();
+        $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$taskId, $orderId ?: null, $title, $description, $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, ($task['priority'] ?? '') === 'high' ? 'high' : 'normal', crm_sql_datetime($task['dueAt'] ?? ''), $quantity, $completed, crm_required_text($task['unit'] ?? 'задача', 'единица', 80), $status === 'blocked' ? $blockReason : '', '[]', null, '[]', (int)$user['id']]);
+        if ($question !== '') $db->prepare("INSERT INTO crm_task_questions (task_id, question, requester_user_id, answer) VALUES (?, ?, ?, '')")->execute([$taskId, $question, (int)$user['id']]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        if ($assignee !== '' && $assignee !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($assignee, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : $title, '#task/' . $taskId, 'task:create:' . $taskId);
+        $db->commit();
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    crm_audit((int)$user['id'], 'task.create', 'task', $taskId, ['assigneeId' => $assignee]);
+    try { crm_push_dispatch(4); } catch (Throwable $error) { error_log('EFT CRM task push failed: ' . $error->getMessage()); }
+    crm_json(['ok' => true, 'taskId' => $taskId, 'workspace' => crm_workspace_for_user($user)]);
+}
+
 if ($action === 'tasks.answer' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
     $input = crm_input(8192);

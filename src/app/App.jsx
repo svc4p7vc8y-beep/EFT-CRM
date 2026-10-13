@@ -40,6 +40,8 @@ export function App({ runtime = { mode: 'demo' } }) {
   const { state: localState, command, storageError, replace } = useWorkspace();
   const liveSession = runtime.mode === 'server'; const sessionUser = runtime.user;
   const canSaveWorkspace = !liveSession || runtime.capabilities?.includes('*') || (runtime.capabilities?.includes('clients.manage') && runtime.capabilities?.includes('tasks.manage'));
+  const canManageTasks = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('tasks.manage');
+  const canCreateTask = canManageTasks || (runtime.capabilities?.includes('tasks.self') && Boolean(sessionUser?.employeeId));
   const canSaveInventory = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('procurement.manage');
   const canManageIntegrations = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('integrations.manage');
   const [serverOverride, setServerOverride] = useState(null);
@@ -136,6 +138,18 @@ export function App({ runtime = { mode: 'demo' } }) {
     return next;
   }
   function safeMutate(action, payload, message) { try { mutate(action, payload, message); return true; } catch (e) { setToast({ text: e.message, error: true }); return false; } }
+  async function createTask(payload) {
+    if (!liveSession) return mutate('task.create', payload, 'Задача создана');
+    if (!canCreateTask) throw new Error('У вашего аккаунта нет права создавать задачи.');
+    const prepared = { ...payload, assigneeId: canManageTasks ? (payload.assigneeId || '') : sessionUser.employeeId };
+    const next = applyCommand(state, 'task.create', prepared);
+    await saveQueue.current;
+    const result = await runtime.createTask(prepared);
+    revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current);
+    setServerOverride(result.workspace);
+    setToast({ text: 'Задача сохранена на сервере', error: false });
+    return { ...next, createdTaskId: result.taskId, tasks: result.workspace.tasks };
+  }
   function openLead(id) { if (!id) return; setSelectedLead(id); setPage('client'); setSearch(''); setSidebar(false); window.location.hash = `client/${encodeURIComponent(id)}`; }
   function openSite(id) { setSelectedSite(id); setPage('construction'); setSearch(''); setSidebar(false); window.location.hash = id ? `construction/${encodeURIComponent(id)}` : 'construction'; }
   async function uploadConstructionPhoto(stageId, file) {
@@ -196,7 +210,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   if (modal?.type === 'client-edit' && modalLead) { const { client, site } = leadContext(state, modalLead); dialog = <Dialog title="Контакты и объект" onClose={closeModal}><ClientForm client={client} site={site} onClose={closeModal} onSubmit={(p) => { mutate('client.update', { ...p, id: client.id, siteId: site.id }); closeModal(); }} /></Dialog>; }
   if (modal?.type === 'activity') dialog = <Dialog title="Записать общение" onClose={closeModal}><ActivityForm state={state} siteId={modal.siteId} onClose={closeModal} onSubmit={(p) => { mutate('activity.create', p, 'Запись добавлена в историю'); closeModal(); }} /></Dialog>;
   if (modal?.type === 'order' && modalLead) dialog = <Dialog title="Передать заказ в производство" onClose={closeModal}><OrderForm state={state} onClose={closeModal} onSubmit={(p) => { mutate('order.create', { ...p, leadId: modal.id }, 'Созданы заказ и первое задание цеху'); closeModal(); }} /></Dialog>;
-  if (modal?.type === 'task-new' || (modal?.type === 'task-edit' && modalTask)) dialog = <Dialog key={`${modal.type}-${modal.id}`} title={modal.type === 'task-new' ? 'Новое задание' : 'Изменить задание'} onClose={closeModal}><TaskForm state={state} task={modalTask ? { ...modalTask, status: modal.status || modalTask.status } : null} defaults={modal} onClose={closeModal} onSubmit={(p) => { const next = mutate(modal.type === 'task-new' ? 'task.create' : 'task.update', { ...p, id: modal.id, questionRequesterName: sessionUser?.displayName || 'Автор вопроса' }, 'Задание сохранено'); setModal({ type: 'task', id: modal.type === 'task-new' ? next.tasks[0].id : modal.id }); }} /></Dialog>;
+  if (modal?.type === 'task-new' || (modal?.type === 'task-edit' && modalTask)) dialog = <Dialog key={`${modal.type}-${modal.id}`} title={modal.type === 'task-new' ? 'Новое задание' : 'Изменить задание'} onClose={closeModal}><TaskForm state={state} task={modalTask ? { ...modalTask, status: modal.status || modalTask.status } : null} defaults={canManageTasks ? modal : { ...modal, assigneeId: sessionUser?.employeeId }} ownTaskOnly={!canManageTasks} onClose={closeModal} onSubmit={async (p) => { const data = { ...p, id: modal.id, questionRequesterName: sessionUser?.displayName || 'Автор вопроса' }; if (modal.type === 'task-new') { const next = await createTask(data); setModal({ type: 'task', id: next.createdTaskId || next.tasks[0]?.id }); } else { mutate('task.update', data, 'Задание сохранено'); setModal({ type: 'task', id: modal.id }); } }} /></Dialog>;
   if (modal?.type === 'task' && modalTask) dialog = <Dialog title={modalTask.title} onClose={closeModal} wide><TaskDetail state={state} task={modalTask} onEdit={canSaveWorkspace ? () => setModal({ type: 'task-edit', id: modalTask.id }) : null} onCheck={canSaveWorkspace ? (p) => safeMutate('task.check', p, 'Чек-лист обновлён') : null} onMove={canSaveWorkspace ? moveTask : null} onComment={canSaveWorkspace ? (p) => mutate('activity.create', p, 'Комментарий добавлен') : null} onAnswer={(!liveSession || canSaveWorkspace || (Boolean(modalTask.assigneeId) && sessionUser?.employeeId === modalTask.assigneeId)) ? (answer) => answerTask(modalTask.id, answer) : null} /></Dialog>;
   if (modal?.type === 'data') dialog = <Dialog title="Данные на этом устройстве" onClose={closeModal}><DataTools state={state} replace={replace} onClose={closeModal} /></Dialog>;
   if (modal?.type === 'profile') dialog = <Dialog title="Рабочий аккаунт" onClose={closeModal}><div className="form-content account-summary"><span className="profile-avatar">{initials(sessionUser?.displayName)}</span><div><strong>{sessionUser?.displayName}</strong><span>{roleLabels[sessionUser?.role] || sessionUser?.role}</span><small>Логин: {sessionUser?.username}</small></div><p><ShieldCheck size={17} />Сессия защищена. Права доступа назначаются администратором CRM.</p></div><footer className="dialog-actions"><button className="button" onClick={closeModal}>Закрыть</button><button className="button logout-button" onClick={runtime.onLogout}><LogOut size={16} />Выйти</button></footer></Dialog>;
@@ -215,7 +229,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'client' && selected ? <ClientWorkspace key={selected.id} state={state} lead={selected} command={mutate} onBack={() => navigate('leads')} onEditLead={() => setModal({ type: 'lead-edit', id: selected.id })} onEditClient={() => setModal({ type: 'client-edit', id: selected.id })} onTransfer={() => setModal({ type: 'order', id: selected.id })} onOpenTask={(id) => setModal({ type: 'task', id })} notify={(text, error = false) => setToast({ text, error })} /> : null}
       {page === 'client' && !selected ? <section className="page"><p>Заявка не найдена.</p><button className="button" onClick={() => navigate('leads')}>Вернуться к заявкам</button></section> : null}
       {page === 'production' ? <Production key={page} {...taskProps} /> : null}
-      {page === 'tasks' ? <MyTasks state={state} search={search} command={mutate} onCreate={() => setModal({ type: 'task-new' })} onOpen={(id) => setModal({ type: 'task', id })} onEdit={(id) => setModal({ type: 'task-edit', id })} onMove={moveTask} /> : null}
+      {page === 'tasks' ? <MyTasks state={state} search={search} command={mutate} createTask={createTask} ownTaskOnly={!canManageTasks} ownEmployeeId={sessionUser?.employeeId || ''} onCreate={() => setModal({ type: 'task-new' })} onOpen={(id) => setModal({ type: 'task', id })} onEdit={(id) => setModal({ type: 'task-edit', id })} onMove={moveTask} /> : null}
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}

@@ -83,6 +83,7 @@ export const crmApi = {
   readNotification: (id) => request('notifications.read', { method: 'POST', body: { id } }),
   testNotification: () => request('notifications.test', { method: 'POST', body: {} }),
   answerTask: (taskId, answer) => request('tasks.answer', { method: 'POST', body: { taskId, answer } }),
+  createTask: (task) => request('tasks.create', { method: 'POST', body: { task } }),
   saveWorkspace: (workspace, baseRevision, initialize = false) => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize } }),
   mergeClients: (targetId, sourceId) => request('clients.merge', { method: 'POST', body: { targetId, sourceId } }),
   uploadConstructionPhoto: (stageId, file) => { const body = new FormData(); body.append('stageId', stageId); body.append('photo', file); return request('construction.photo', { method: 'POST', body }); },
