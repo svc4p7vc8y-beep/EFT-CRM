@@ -50,6 +50,10 @@ export function App({ runtime = { mode: 'demo' } }) {
   const inventoryRevisionRef = useRef(Number(runtime.serverData?.inventoryRevision || 0));
   const saveQueue = useRef(Promise.resolve());
   const inventorySaveQueue = useRef(Promise.resolve());
+  const mutationGeneration = useRef(0);
+  const activeTaskCreates = useRef(0);
+  const refreshWorkspaceRef = useRef(runtime.refreshWorkspace);
+  refreshWorkspaceRef.current = runtime.refreshWorkspace;
   const initializing = useRef(false);
   const inventoryInitializing = useRef(false);
   const seenCommunications = useRef(null);
@@ -68,6 +72,28 @@ export function App({ runtime = { mode: 'demo' } }) {
   const late = state.leads.filter((l) => l.status !== 'lost' && isOverdue(l.dueAt)); const blocked = state.tasks.filter((t) => t.status === 'blocked'); const openTaskCount = state.tasks.filter((task) => task.status !== 'done').length;
   useEffect(() => { const change = () => { const route = getRoute(); setPage(route.page); setSelectedLead(route.leadId); setSelectedSite(route.siteId); if (route.taskId) setModal({ type: 'task', id: route.taskId }); setSearch(''); setSidebar(false); setMobileSearch(false); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
   useEffect(() => { if (!liveSession || !runtime.notifications) return; let active = true; const refresh = () => runtime.notifications().then((result) => { if (active) setNotificationUnread(Number(result.unread || 0)); }).catch(() => {}); refresh(); const timer = window.setInterval(refresh, 60000); const onFocus = () => refresh(); window.addEventListener('focus', onFocus); return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus); }; }, [liveSession, runtime.notifications]);
+  useEffect(() => {
+    if (!liveSession) return undefined;
+    let active = true; let syncing = false;
+    const refresh = async () => {
+      if (!active || syncing || document.visibilityState === 'hidden' || activeTaskCreates.current) return;
+      syncing = true;
+      const generation = mutationGeneration.current;
+      try {
+        await Promise.all([saveQueue.current, inventorySaveQueue.current]);
+        if (!active || generation !== mutationGeneration.current || activeTaskCreates.current) return;
+        const fresh = await refreshWorkspaceRef.current?.();
+        if (!active || !fresh || generation !== mutationGeneration.current || activeTaskCreates.current) return;
+        if (Number(fresh.workspaceRevision || 0) >= revisionRef.current) { revisionRef.current = Number(fresh.workspaceRevision || 0); setServerOverride(fresh); }
+        if (Number(fresh.inventoryRevision || 0) >= inventoryRevisionRef.current) { inventoryRevisionRef.current = Number(fresh.inventoryRevision || 0); setInventoryOverride(fresh); }
+      } catch { /* Keep the last visible data; retry on the next focus or interval. */ }
+      finally { syncing = false; }
+    };
+    const timer = window.setInterval(refresh, 60000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [liveSession]);
   useEffect(() => { if (!sidebar) return; const close = (event) => { if (event.key === 'Escape') setSidebar(false); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [sidebar]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [page, selectedLead]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 4500); return () => clearTimeout(id); }, [toast]);
@@ -82,8 +108,8 @@ export function App({ runtime = { mode: 'demo' } }) {
     }
   }, [state.activities, liveSession]);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem(themeKey, theme); const color = theme === 'dark' ? '#101820' : theme === 'brand' ? '#282b27' : '#142b3b'; document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color); }, [theme, themeKey]);
-  useEffect(() => { revisionRef.current = Number(runtime.serverData?.workspaceRevision || revisionRef.current); }, [runtime.serverData?.workspaceRevision]);
-  useEffect(() => { inventoryRevisionRef.current = Number(runtime.serverData?.inventoryRevision || inventoryRevisionRef.current); }, [runtime.serverData?.inventoryRevision]);
+  useEffect(() => { revisionRef.current = Math.max(revisionRef.current, Number(runtime.serverData?.workspaceRevision || 0)); }, [runtime.serverData?.workspaceRevision]);
+  useEffect(() => { inventoryRevisionRef.current = Math.max(inventoryRevisionRef.current, Number(runtime.serverData?.inventoryRevision || 0)); }, [runtime.serverData?.inventoryRevision]);
   useEffect(() => {
     if (!liveSession || !canSaveWorkspace || runtime.serverData?.workspaceInitialized !== false || initializing.current || !runtime.saveWorkspace) return;
     initializing.current = true;
@@ -109,6 +135,7 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (coreServerActions.has(action) && !canSaveWorkspace) throw new Error('Для этого действия недостаточно прав. Обратитесь к администратору CRM.');
     if (inventoryServerActions.has(action) && !canSaveInventory) throw new Error('Для изменения закупок и склада нужны права снабжения.');
     const next = applyCommand(state, action, payload);
+    if (coreServerActions.has(action) || inventoryServerActions.has(action)) mutationGeneration.current++;
     if (!coreServerActions.has(action) && !inventoryServerActions.has(action)) replace(next);
     if (!inventoryServerActions.has(action)) setToast({ text: message, error: false });
     if (coreServerActions.has(action) && runtime.saveWorkspace) {
@@ -143,12 +170,15 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (!canCreateTask) throw new Error('У вашего аккаунта нет права создавать задачи.');
     const prepared = { ...payload, assigneeId: canManageTasks ? (payload.assigneeId || '') : sessionUser.employeeId };
     const next = applyCommand(state, 'task.create', prepared);
-    await saveQueue.current;
-    const result = await runtime.createTask(prepared);
-    revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current);
-    setServerOverride(result.workspace);
-    setToast({ text: 'Задача сохранена на сервере', error: false });
-    return { ...next, createdTaskId: result.taskId, tasks: result.workspace.tasks };
+    mutationGeneration.current++; activeTaskCreates.current++;
+    try {
+      await saveQueue.current;
+      const result = await runtime.createTask(prepared);
+      revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current);
+      setServerOverride(result.workspace);
+      setToast({ text: 'Задача сохранена на сервере', error: false });
+      return { ...next, createdTaskId: result.taskId, tasks: result.workspace.tasks };
+    } finally { activeTaskCreates.current--; }
   }
   function openLead(id) { if (!id) return; setSelectedLead(id); setPage('client'); setSearch(''); setSidebar(false); window.location.hash = `client/${encodeURIComponent(id)}`; }
   function openSite(id) { setSelectedSite(id); setPage('construction'); setSearch(''); setSidebar(false); window.location.hash = id ? `construction/${encodeURIComponent(id)}` : 'construction'; }

@@ -52,7 +52,7 @@
   .table-wrap{max-width:100%;-webkit-overflow-scrolling:touch;overscroll-behavior-inline:contain}
   .dialog{max-height:calc(100dvh - 16px)}
   .dialog-actions{position:sticky;bottom:0;background:var(--surface,#fff);z-index:1;padding-bottom:calc(13px + env(safe-area-inset-bottom))}
-  .toast{bottom:calc(75px + env(safe-area-inset-bottom));left:12px;right:12px;width:auto;max-width:none}
+  .toast{bottom:calc(75px + env(safe-area-inset-bottom));left:12px;right:auto;transform:none;width:max-content;max-width:calc(100vw - 24px)}
 }
 
 @media(max-width:480px){
@@ -66,9 +66,14 @@
   .segmented button{flex:0 0 auto;min-height:40px}
   .summary-strip{overflow-x:auto;gap:8px}
   .summary-strip>span{min-width:75px}
-  .my-tasks-title{flex-wrap:wrap;gap:12px}
-  .my-tasks-title>div{width:100%}
-  .my-tasks-title>.button{width:100%}
+  .my-tasks-title{flex-wrap:nowrap;align-items:center;gap:7px}
+  .my-tasks-title>div{width:auto;min-width:0;flex:1}
+  .my-tasks-title h1{font-family:"Bradley Hand","Segoe Print","Comic Sans MS",cursive;font-size:25px;line-height:1.15;letter-spacing:-.04em;color:#1765a5;white-space:nowrap}
+  :root[data-theme="dark"] .my-tasks-title h1{color:#78bdff}
+  .my-tasks-title p{display:none}
+  .my-tasks-title>.task-advanced-button{width:auto;min-height:39px;flex:0 0 auto;gap:4px;padding:7px 8px;border-color:#5e9f27;border-radius:10px;background:#6aa829;color:#fff;font-size:10px;font-weight:700}
+  .my-tasks-title>.task-advanced-button:hover{background:#568f1d;color:#fff}
+  .my-tasks-title>.task-advanced-button svg{width:15px;height:15px;stroke-width:2.5}
   .task-quick-add{gap:8px}
   .task-quick-add .button.primary{min-height:44px}
   .task-controls .segmented:first-child{width:100%;justify-content:space-between}
