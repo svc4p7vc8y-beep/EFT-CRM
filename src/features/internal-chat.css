@@ -1,8 +1,8 @@
-.internal-chat-page{min-width:0}
+.internal-chat-page{display:flex;flex-direction:column;min-width:0;min-height:0;height:calc(100dvh - 65px)}
 .internal-chat-actions{display:flex;gap:8px;flex-wrap:wrap}
 .chat-demo-note{padding:10px 13px;margin:-8px 0 15px;border:1px solid #d6e4c8;border-radius:8px;background:#f7faef;color:#50664b;font-size:12px}
-.internal-chat-layout{display:grid;grid-template-columns:minmax(240px,310px) minmax(0,1fr);height:calc(100dvh - 175px);min-height:550px;max-width:1400px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface,#fff)}
-.chat-thread-list{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line);background:var(--surface,#fff)}
+.internal-chat-layout{display:grid;grid-template-columns:minmax(240px,310px) minmax(0,1fr);flex:1 1 auto;min-height:0;max-width:1400px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface,#fff)}
+.chat-thread-list{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line);background:var(--surface,#fff)}
 .chat-filter{display:block;padding:13px;border-bottom:1px solid var(--line)}
 .chat-filter input{width:100%;min-height:40px;font-size:14px}
 .chat-thread-items{overflow:auto;flex:1}
@@ -17,7 +17,7 @@
 .chat-thread-copy>span{font-size:12px;color:var(--muted)}
 .chat-unread{display:grid;place-items:center;min-width:22px;height:22px;padding:2px 5px;border-radius:12px;background:#4b903d;color:white;font-size:11px}
 .chat-empty-list{padding:25px 15px;color:var(--muted);font-size:13px;text-align:center}
-.chat-conversation{display:flex;flex-direction:column;min-width:0;background:#f6f9f7}
+.chat-conversation{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:#f6f9f7}
 .chat-conversation-head{display:flex;align-items:center;gap:10px;min-height:67px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--surface,#fff)}
 .chat-conversation-head>div{min-width:0;flex:1}
 .chat-conversation-head strong,.chat-conversation-head span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -59,7 +59,9 @@
 :root[data-theme="dark"] .chat-thread-item:hover,:root[data-theme="dark"] .chat-thread-item.active{background:#22372d}
 :root[data-theme="dark"] .chat-thread-copy strong,:root[data-theme="dark"] .chat-empty-conversation strong{color:#e4efe5}
 :root[data-theme="dark"] .chat-conversation{background:#18231c}:root[data-theme="dark"] .chat-message{background:#27372c;color:#e7efe8;border-color:#3d5543}:root[data-theme="dark"] .chat-message.own{background:#315239}
+@media(min-width:761px) and (max-width:900px){.internal-chat-page{height:calc(100dvh - 124px - env(safe-area-inset-bottom))}}
 @media(max-width:760px){
+  .internal-chat-page{display:block;height:auto}
   .internal-chat-page.mobile-thread-page{padding:0}
   .internal-chat-page.mobile-thread-page>.page-heading,.internal-chat-page.mobile-thread-page>.chat-demo-note{display:none}
   .internal-chat-page.mobile-thread-page .internal-chat-layout{height:calc(100dvh - 124px - env(safe-area-inset-bottom));min-height:0;border:0;border-radius:0}
@@ -76,4 +78,26 @@
   .mobile-thread-page .chat-message-list{flex:1;min-height:0;max-height:none;overflow:auto}
   .chat-message{max-width:88%}.chat-compose{padding:9px 10px 5px}.chat-compose .button{width:46px;padding:0}.chat-compose .button span{display:none}
   .chat-delivery-hint{padding:4px 10px 10px}
+  .internal-chat-page.mobile-thread-page .internal-chat-layout{
+    position:fixed;
+    inset:60px 0 calc(64px + env(safe-area-inset-bottom)) 0;
+    z-index:25;
+    height:auto;
+    min-height:0;
+    overflow:hidden;
+  }
+  .internal-chat-layout.mobile-thread-open .chat-conversation{
+    height:100%;
+    min-height:0;
+    overflow:hidden;
+  }
+  .mobile-thread-page .chat-message-list{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+  .mobile-thread-page .chat-compose,
+  .mobile-thread-page .chat-delivery-hint,
+  .mobile-thread-page .chat-file-queue{flex-shrink:0}
 }
