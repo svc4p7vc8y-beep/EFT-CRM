@@ -16,7 +16,7 @@ const QUICK_REPLIES = [
 const WORKFLOW = { '': 'Без статуса', reply: 'Нужно ответить', waiting: 'Ждём клиента', working: 'В работе', closed: 'Закрыто' };
 const STATUS = { internal: ['В CRM', Check], saved: ['Сохранено', Check], queued: ['В очереди', Check], sent: ['Отправлено', CheckCheck], delivered: ['Доставлено', CheckCheck], error: ['Ошибка', AlertCircle] };
 const channelName = (id) => CHANNELS.find((item) => item.id === id)?.label || (id === 'call' ? 'Звонок' : 'Система');
-const filesOf = (item) => (item.attachments || []).filter((file) => file?.key || file?.name);
+const filesOf = (item) => (item.attachments || []).filter((file) => file?.key && file?.name && file?.url);
 const UNASSIGNED = '__unassigned_message__';
 const senderOf = (item) => { const sender = item.attachments?.find((entry) => entry?.kind === 'sender'); return sender?.email || sender?.name || ''; };
 const recipientOf = (item) => item.attachments?.find((entry) => entry?.kind === 'recipient')?.email || '';
