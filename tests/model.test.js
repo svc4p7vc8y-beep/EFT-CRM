@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCommand, createDemoState, validateState } from '../src/app/model.js';
 import { briefFromForm, calculatorBrief } from '../src/app/buildingBrief.js';
-import { taskStory } from '../src/features/taskStory.js';
+import { taskStory, taskHistory } from '../src/features/taskStory.js';
 
 test('непривязанный MAX-диалог сохраняется в неразобранных', () => {
   const state = createDemoState();
@@ -79,6 +79,19 @@ test('результат завершения остаётся в ленте з�
   assert.equal(story.at(-1).kind, 'completion');
   assert.equal(story.at(-1).text, 'Собраны 38 панелей, размеры проверены');
   assert.doesNotThrow(() => validateState(state));
+});
+test('отметка чек-листа видна в обсуждении, правки находятся отдельно в истории', () => {
+  let state = createDemoState();
+  const task = state.tasks.find((item) => item.id === 'task-1');
+  const title = task.checklist[0].title;
+  state = applyCommand(state, 'task.check', { id: task.id, checkId: task.checklist[0].id, authorId: 'worker-1' });
+  state = applyCommand(state, 'task.update', { id: task.id, description: 'Уточнённое описание', authorId: 'manager-1' });
+  const conversation = taskStory(state.tasks.find((item) => item.id === task.id), state.activities);
+  const history = taskHistory(state.tasks.find((item) => item.id === task.id), state.activities);
+  assert.ok(conversation.some((item) => item.kind === 'check' && item.text.includes(title) && item.authorId === 'worker-1'));
+  assert.ok(!conversation.some((item) => item.text.includes('Изменено:')));
+  assert.ok(history.some((item) => item.text.includes('описание')));
+  assert.ok(!history.some((item) => item.text.includes('Выполнен пункт')));
 });
 test('параметры новой заявки сохраняются на объекте и передаются в анкету калькулятора', () => {
   const buildingBrief = briefFromForm({ 'brief.buildingType': 'Баня', 'brief.length': '8', 'brief.width': '6', 'brief.floors': '1', 'brief.wallHeight': '2.5', 'brief.wallThickness': '174 мм', 'brief.roofShape': 'Двускатная', 'brief.roofType': 'Тёплая SIP', 'brief.scope.2': 'on', 'brief.scope.5': 'on' });

@@ -372,7 +372,7 @@ if ($action === 'tasks.check' && $method === 'POST') {
     $title = $checkId === '' ? crm_required_text($input['title'] ?? '', 'пункт проверки', 500) : '';
     $db = crm_db(); $db->beginTransaction();
     try {
-        $lookup = $db->prepare('SELECT id, assignee_id, status, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
+        $lookup = $db->prepare('SELECT id, site_id, assignee_id, status, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
         $lookup->execute([$taskId]); $task = $lookup->fetch();
         if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Задача не найдена.'], 404); }
         if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
@@ -381,13 +381,22 @@ if ($action === 'tasks.check' && $method === 'POST') {
         if ($task['status'] === 'done') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_completed', 'message' => 'Задача уже завершена.'], 409); }
         $checklist = json_decode((string)$task['checklist_json'], true);
         if (!is_array($checklist)) $checklist = [];
+        $eventSubject = 'checklist.added';
         if ($checkId !== '') {
             $found = false;
-            foreach ($checklist as &$item) if (($item['id'] ?? '') === $checkId) { $item['done'] = empty($item['done']); $found = true; break; }
+            foreach ($checklist as &$item) if (($item['id'] ?? '') === $checkId) {
+                $item['done'] = empty($item['done']); $title = (string)($item['title'] ?? 'Пункт чек-листа');
+                $eventSubject = $item['done'] ? 'checklist.done' : 'checklist.reopened';
+                $found = true; break;
+            }
             unset($item);
             if (!$found) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Пункт проверки не найден.'], 404); }
         } else $checklist[] = ['id' => crm_uuid(), 'title' => $title, 'done' => false];
         $db->prepare('UPDATE crm_tasks SET checklist_json=? WHERE id=?')->execute([json_encode($checklist, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $taskId]);
+        $eventText = $eventSubject === 'checklist.done' ? 'Выполнен пункт чек-листа: ' . $title : ($eventSubject === 'checklist.reopened' ? 'Пункт чек-листа возвращён в работу: ' . $title : 'Добавлен пункт чек-листа: ' . $title);
+        $eventId = crm_uuid();
+        $insert = $db->prepare("INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,?,'system','system','internal',?,?,?,1,'[]','internal','',NOW(),?,?)");
+        $insert->execute([$eventId, $task['site_id'] ?: null, $taskId, $eventId, $eventSubject, $eventText, (int)$user['id'], $user['employeeId'] ?: null]);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }

@@ -89,7 +89,7 @@ export function createDemoState() {
   return extendWorkspace({ schemaVersion: 1, revision: 0, clients, sites, leads, orders, tasks, activities, employees, crews, constructionStages, logistics });
 }
 
-function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1') { const channel = type === 'email' ? 'email' : type === 'call' ? 'call' : type === 'message' ? 'telegram' : type === 'system' ? 'system' : 'note'; state.activities.unshift({ id: uid(), siteId, taskId, type, channel, direction: ['system','note','call'].includes(channel) ? 'internal' : 'outgoing', subject: '', externalKey: '', text: message, authorId, createdAt: new Date().toISOString(), read: true, attachments: [] }); }
+function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1', subject = '') { const channel = type === 'email' ? 'email' : type === 'call' ? 'call' : type === 'message' ? 'telegram' : type === 'system' ? 'system' : 'note'; state.activities.unshift({ id: uid(), siteId, taskId, type, channel, direction: ['system','note','call'].includes(channel) ? 'internal' : 'outgoing', subject, externalKey: '', text: message, authorId, createdAt: new Date().toISOString(), read: true, attachments: [] }); }
 export function applyCommand(current, action, payload = {}) {
   const state = extendWorkspace(structuredClone(current));
   if (applyOperation(state, action, payload)) { /* Operation committed below with shared validation. */ }
@@ -136,7 +136,7 @@ export function applyCommand(current, action, payload = {}) {
     const existing = state.tasks.find((v) => v.id === payload.id);
     if (action === 'task.update' && !existing) throw new Error('Задание не найдено');
     const template = state.taskTemplates.find((t) => t.id === payload.templateId);
-    const task = existing || { id: uid(), createdAt: new Date().toISOString(), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '', siteId: '', constructionStageId: '', crewId: '', originalDueAt: '', rescheduleHistory: [], question: '', answer: '', answeredAt: '' };
+    const task = existing || { id: uid(), createdAt: new Date().toISOString(), createdByName: String(payload.createdByName || 'Автор не указан'), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '', siteId: '', constructionStageId: '', crewId: '', originalDueAt: '', rescheduleHistory: [], question: '', answer: '', answeredAt: '' };
     const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason', 'question'].includes(key))) };
     next.title = requireText(next.title, 'Название задания'); next.description = text(next.description); next.unit = requireText(next.unit, 'Единица'); next.blockReason = text(next.blockReason);
     next.question = text(next.question, 5000);
@@ -160,8 +160,14 @@ export function applyCommand(current, action, payload = {}) {
       if (next.checklist.some((v) => !v.done)) throw new Error('Выполните все пункты чек-листа перед приёмкой');
       next.completedQty = next.quantity;
     }
+    const changed = existing ? [
+      ['title', 'название'], ['description', 'описание'], ['assigneeId', 'исполнитель'], ['dueAt', 'срок'], ['status', 'статус'], ['priority', 'приоритет'], ['quantity', 'объём'], ['completedQty', 'готовый объём'], ['unit', 'единица'], ['blockReason', 'причина блокировки'], ['question', 'вопрос исполнителю'],
+    ].filter(([key]) => existing[key] !== next[key]).map(([key, label]) => {
+      const display = (value) => key === 'status' ? TASK_STAGES.find((stage) => stage.id === value)?.label || value : key === 'assigneeId' ? state.employees.find((person) => person.id === value)?.name || 'Не назначен' : String(value ?? '').trim().slice(0, 90) || 'Не указано';
+      return `${label}: ${display(existing[key])} → ${display(next[key])}`;
+    }) : [];
     if (existing) Object.assign(existing, next); else state.tasks.unshift(next);
-    log(state, next.siteId || orderSiteId, existing ? `${next.title}: ${TASK_STAGES.find((s) => s.id === next.status).label}` : `Создано задание: ${next.title}`, next.id);
+    if (!existing || changed.length) log(state, next.siteId || orderSiteId, existing ? `Изменено: ${changed.join(', ')}` : `Создано задание: ${next.title}`, next.id, 'system', payload.authorId || 'manager-1');
   } else if (action === 'construction.plan.initialize') {
     const site = state.sites.find((value) => value.id === payload.siteId); if (!site) throw new Error('Объект не найден');
     if (state.constructionStages.some((stage) => stage.siteId === site.id)) throw new Error('План по объекту уже создан');
@@ -231,9 +237,13 @@ export function applyCommand(current, action, payload = {}) {
   } else if (action === 'task.check') {
     const task = state.tasks.find((v) => v.id === payload.id); if (!task) throw new Error('Задание не найдено');
     if (task.status === 'done') throw new Error('Сначала верните задание в работу');
-    if (payload.checkId) { const item = task.checklist.find((v) => v.id === payload.checkId); if (item) item.done = !item.done; }
-    else task.checklist.push({ id: uid(), title: requireText(payload.title, 'Пункт чек-листа'), done: false });
-    log(state, state.orders.find((v) => v.id === task.orderId)?.siteId || '', `Обновлён чек-лист: ${task.title}`, task.id);
+    let title; let subject;
+    if (payload.checkId) {
+      const item = task.checklist.find((v) => v.id === payload.checkId); if (!item) throw new Error('Пункт чек-листа не найден');
+      item.done = !item.done; title = item.title; subject = item.done ? 'checklist.done' : 'checklist.reopened';
+    } else { title = requireText(payload.title, 'Пункт чек-листа'); task.checklist.push({ id: uid(), title, done: false }); subject = 'checklist.added'; }
+    const message = subject === 'checklist.done' ? `Выполнен пункт чек-листа: ${title}` : subject === 'checklist.reopened' ? `Пункт чек-листа возвращён в работу: ${title}` : `Добавлен пункт чек-листа: ${title}`;
+    log(state, task.siteId || state.orders.find((v) => v.id === task.orderId)?.siteId || '', message, task.id, 'system', payload.authorId || 'manager-1', subject);
   } else throw new Error('Неизвестное действие');
   state.revision += 1;
   if (INVENTORY_ACTIONS.has(action)) validateInventoryOperations(state);
