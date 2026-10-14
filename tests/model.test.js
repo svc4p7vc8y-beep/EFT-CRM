@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import { applyCommand, createDemoState, validateState } from '../src/app/model.js';
 import { briefFromForm, calculatorBrief } from '../src/app/buildingBrief.js';
 
+test('непривязанный MAX-диалог сохраняется в неразобранных', () => {
+  const state = createDemoState();
+  const email = state.activities.find((item) => item.channel === 'email' && !item.siteId);
+  state.activities.push({ ...email, id: 'max-unassigned-test', channel: 'max', type: 'message', externalKey: 'mid-123', text: 'Нужен расчёт дома', attachments: [{ kind: 'sender', name: 'Клиент' }, { kind: 'max_chat', id: '12345' }] });
+  assert.equal(validateState(state).activities.at(-1).channel, 'max');
+  state.activities.at(-1).channel = 'note';
+  assert.throws(() => validateState(state), /история событий/);
+});
+
 test('заказ фиксирует комплектацию и создаёт связанное задание ровно один раз', () => {
   const original = createDemoState();
   assert.throws(() => applyCommand(original, 'order.create', { leadId: 'lead-1', scope: 'СИП' }), /Подтвердите/);

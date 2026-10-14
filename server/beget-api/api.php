@@ -86,9 +86,21 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
             $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
             if ($site->fetchColumn()) {
                 $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
+                $otherSite = array_search($chatId, $map, true);
+                if ($otherSite !== false && $otherSite !== $siteId) crm_json(['ok' => true]);
                 $map[$siteId] = $chatId; $config['site_chat_ids'] = $map;
                 unset($links[$token]); $config['pending_links'] = $links;
                 crm_store_private_integration('max', $config);
+                crm_schema_ensure_v30();
+                $rows = crm_db()->query("SELECT id, attachments_json FROM crm_communications WHERE site_id IS NULL AND channel='max'")->fetchAll();
+                $backfill = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='max'");
+                foreach ($rows as $row) {
+                    $entries = json_decode((string)$row['attachments_json'], true);
+                    foreach (is_array($entries) ? $entries : [] as $entry) {
+                        if (is_array($entry) && ($entry['kind'] ?? '') === 'max_chat' && (string)($entry['id'] ?? '') === $chatId) { $backfill->execute([$siteId, $row['id']]); break; }
+                    }
+                }
+                crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
                 try { crm_http_json('https://platform-api2.max.ru/messages?chat_id=' . rawurlencode($chatId), ['text' => 'Чат подключён к ЭФТ. Ваши сообщения появятся в CRM.', 'notify' => true], ['Authorization: ' . $config['bot_token']]); }
                 catch (Throwable $error) { error_log('EFT CRM MAX welcome failed'); }
             }
@@ -98,25 +110,24 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     if ($type !== 'message_created') crm_json(['ok' => true]);
     $message = $update['message'] ?? null;
     if (!is_array($message) || !empty($message['sender']['is_bot'])) crm_json(['ok' => true]);
-    $chatId = (string)($message['recipient']['chat_id'] ?? '');
+    $chatId = (string)($message['recipient']['chat_id'] ?? $update['chat_id'] ?? '');
     $body = is_array($message['body'] ?? null) ? $message['body'] : [];
     $text = trim((string)($body['text'] ?? ''));
     $mid = (string)($body['mid'] ?? '');
     if (!preg_match('/^-?\d{1,20}$/', $chatId) || $text === '' || $mid === '') crm_json(['ok' => true]);
     $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
     $siteId = array_search($chatId, $map, true);
-    if ($siteId === false) crm_json(['ok' => true]);
     crm_schema_ensure_v30();
     $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
-    $metadata = json_encode([['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $metadata = json_encode([['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'max_chat', 'id' => $chatId], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $timestamp = (int)($message['timestamp'] ?? $update['timestamp'] ?? 0);
     $occurredAt = $timestamp > 0 ? (int)floor($timestamp / 1000) : time();
     $insert = crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','max','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
     $eventId = crm_uuid();
-    $insert->execute([$eventId, $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
+    $insert->execute([$eventId, $siteId === false ? null : $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
     if ($insert->rowCount()) {
         crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
-        try { crm_push_notify_site((string)$siteId, $eventId); crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
+        if ($siteId !== false) try { crm_push_notify_site((string)$siteId, $eventId); crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
     }
     crm_json(['ok' => true]);
 }
@@ -703,6 +714,33 @@ if ($action === 'connectors.max.configure' && $method === 'POST') {
     crm_json(['ok' => true, 'username' => $username, 'connectors' => crm_connector_statuses()]);
 }
 
+if ($action === 'connectors.max.check' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $config = crm_integration_config('max');
+    $token = (string)($config['bot_token'] ?? ''); $secret = (string)($config['webhook_secret'] ?? '');
+    if (empty($config['enabled']) || $token === '' || $secret === '') crm_json(['ok' => false, 'code' => 'not_configured', 'message' => 'Сначала подключите MAX-бота.'], 422);
+    $url = 'https://crm.eftsip.ru/api/api.php?action=connectors.max.webhook';
+    try {
+        $result = crm_http_get_json('https://platform-api2.max.ru/subscriptions', ['Authorization: ' . $token]);
+        $active = false;
+        foreach (is_array($result['subscriptions'] ?? null) ? $result['subscriptions'] : [] as $subscription) {
+            $types = is_array($subscription['update_types'] ?? null) ? $subscription['update_types'] : [];
+            if (($subscription['url'] ?? '') === $url && in_array('message_created', $types, true) && in_array('bot_started', $types, true)) { $active = true; break; }
+        }
+        $repaired = !$active;
+        if ($repaired) {
+            $response = crm_http_json('https://platform-api2.max.ru/subscriptions', [
+                'url' => $url, 'update_types' => ['message_created', 'bot_started'], 'secret' => $secret,
+            ], ['Authorization: ' . $token]);
+            if (empty($response['success'])) throw new RuntimeException('MAX не подтвердил подписку.');
+        }
+    } catch (Throwable $error) {
+        crm_json(['ok' => false, 'code' => 'max_check_failed', 'message' => 'Не удалось проверить MAX: ' . $error->getMessage()], 422);
+    }
+    crm_audit((int)$user['id'], 'connector.max.check', 'integration', 'max', ['repaired' => $repaired]);
+    crm_json(['ok' => true, 'subscriptionActive' => true, 'repaired' => $repaired, 'linkedChats' => count((array)($config['site_chat_ids'] ?? []))]);
+}
+
 if ($action === 'connectors.max.link' && $method === 'POST') {
     crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
     $input = crm_input(); $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
@@ -733,13 +771,35 @@ if ($action === 'communications.mail.sync' && $method === 'POST') {
 if ($action === 'communications.assign' && $method === 'POST') {
     crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
     $input = crm_input();
-    $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
+    $messageId = crm_required_text($input['messageId'] ?? '', 'сообщение', 36);
     $siteId = crm_required_text($input['siteId'] ?? '', 'объект клиента', 36);
     $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
     if (!$site->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект клиента не найден.'], 422);
-    $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND is_ignored=0");
-    $statement->execute([$siteId, $messageId]);
-    if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо уже привязано или не найдено.'], 422);
+    $lookup = crm_db()->prepare("SELECT channel, attachments_json FROM crm_communications WHERE id=? AND site_id IS NULL AND channel IN ('email','max') AND is_ignored=0");
+    $lookup->execute([$messageId]); $message = $lookup->fetch();
+    if (!$message) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сообщение уже привязано или не найдено.'], 422);
+    if ($message['channel'] === 'max') {
+        $entries = json_decode((string)$message['attachments_json'], true); $chatId = '';
+        foreach (is_array($entries) ? $entries : [] as $entry) if (is_array($entry) && ($entry['kind'] ?? '') === 'max_chat') $chatId = (string)($entry['id'] ?? '');
+        if (!preg_match('/^-?\d{1,20}$/', $chatId)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не найден идентификатор диалога MAX.'], 422);
+        $config = crm_integration_config('max'); $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
+        $otherSite = array_search($chatId, $map, true);
+        if ($otherSite !== false && $otherSite !== $siteId) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Этот MAX-чат уже привязан к другому объекту.'], 422);
+        $map[$siteId] = $chatId; $config['site_chat_ids'] = $map;
+        crm_store_private_integration('max', $config);
+        $rows = crm_db()->query("SELECT id, attachments_json FROM crm_communications WHERE site_id IS NULL AND channel='max' AND is_ignored=0")->fetchAll();
+        $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='max' AND is_ignored=0");
+        foreach ($rows as $row) {
+            $items = json_decode((string)$row['attachments_json'], true);
+            foreach (is_array($items) ? $items : [] as $entry) {
+                if (is_array($entry) && ($entry['kind'] ?? '') === 'max_chat' && (string)($entry['id'] ?? '') === $chatId) { $statement->execute([$siteId, $row['id']]); break; }
+            }
+        }
+    } else {
+        $statement = crm_db()->prepare("UPDATE crm_communications SET site_id=? WHERE id=? AND site_id IS NULL AND channel='email' AND is_ignored=0");
+        $statement->execute([$siteId, $messageId]);
+        if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо уже привязано или не найдено.'], 422);
+    }
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
     crm_audit((int)$user['id'], 'communication.assign', 'communication', $messageId, ['siteId' => $siteId]);
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
@@ -750,9 +810,9 @@ if ($action === 'communications.ignore' && $method === 'POST') {
     $input = crm_input();
     $messageId = crm_required_text($input['messageId'] ?? '', 'письмо', 36);
     $ignored = !empty($input['ignored']) ? 1 : 0;
-    $statement = crm_db()->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel='email'");
+    $statement = crm_db()->prepare("UPDATE crm_communications SET is_ignored=?, is_read=1 WHERE id=? AND site_id IS NULL AND channel IN ('email','max')");
     $statement->execute([$ignored, $messageId]);
-    if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Письмо не найдено или его статус уже изменён.'], 422);
+    if ($statement->rowCount() !== 1) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сообщение не найдено или его статус уже изменён.'], 422);
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
     crm_audit((int)$user['id'], $ignored ? 'communication.ignore' : 'communication.restore', 'communication', $messageId);
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);

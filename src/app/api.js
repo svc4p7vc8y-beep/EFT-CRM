@@ -111,6 +111,7 @@ export const crmApi = {
   saveTelegramSettings: (botToken) => request('connectors.telegram.configure', { method: 'POST', body: { botToken } }),
   createTelegramLink: (siteId) => request('connectors.telegram.link', { method: 'POST', body: { siteId } }),
   saveMaxSettings: (botToken) => request('connectors.max.configure', { method: 'POST', body: { botToken } }),
+  checkMaxConnection: () => request('connectors.max.check', { method: 'POST', body: {} }),
   createMaxLink: (siteId) => request('connectors.max.link', { method: 'POST', body: { siteId } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, siteId) => request('communications.assign', { method: 'POST', body: { messageId, siteId } }),
