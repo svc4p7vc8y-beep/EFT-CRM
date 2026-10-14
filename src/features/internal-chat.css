@@ -22,6 +22,7 @@
 .chat-conversation-head>div{min-width:0;flex:1}
 .chat-conversation-head strong,.chat-conversation-head span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-conversation-head strong{font-size:16px}.chat-conversation-head span{font-size:11px;color:var(--muted);margin-top:3px}
+.chat-push-status{display:flex;align-items:center;gap:6px;margin:0;padding:7px 16px;border-bottom:1px solid var(--line);background:var(--surface,#fff);color:var(--muted);font-size:11px;line-height:1.4}
 .chat-context-link{font-size:11px;padding-inline:9px;min-height:34px}.chat-conversation-head .chat-back{display:none}
 .chat-message-list{display:flex;flex:1;flex-direction:column;gap:10px;overflow:auto;min-height:0;padding:18px;overscroll-behavior:contain}
 .chat-message{align-self:flex-start;max-width:min(78%,620px);padding:11px 13px;border:1px solid #dce7e1;border-radius:10px 10px 10px 3px;background:#fff;box-shadow:0 2px 6px #1b39220b;overflow-wrap:anywhere}
@@ -54,6 +55,7 @@
 .chat-context-caption{margin-bottom:14px;font-size:14px;font-weight:650}.chat-recipient-list{display:grid;gap:1px;max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
 .chat-recipient-list label{display:flex;align-items:center;gap:10px;min-height:43px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:13px}
 .chat-recipient-list label:last-child{border:0}.chat-recipient-list input{width:18px;height:18px;accent-color:#4b903d}
+.chat-recipient-copy{display:grid;gap:3px}.chat-recipient-copy small{font-size:11px;color:var(--muted)}
 .chat-recipient-list p{padding:15px;font-size:12px;color:var(--muted)}.chat-create-form>small{display:block;margin:10px 0 17px;color:var(--muted);font-size:11px}
 .chat-create-form .dialog-actions{margin:0 -20px;padding:13px 20px}
 :root[data-theme="dark"] .chat-thread-item:hover,:root[data-theme="dark"] .chat-thread-item.active{background:#22372d}

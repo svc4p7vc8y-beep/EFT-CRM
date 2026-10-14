@@ -55,8 +55,17 @@ export function AuthRoot() {
   const [auth, setAuth] = useState(() => serverMode ? { status: 'loading' } : { status: 'demo' });
 
   useEffect(() => {
-    if (auth.status !== 'ready') return;
-    syncExistingPush(crmApi.subscribePush).catch(() => {});
+    if (auth.status !== 'ready') return undefined;
+    let lastSync = 0;
+    const sync = () => {
+      if (document.visibilityState === 'hidden' || Date.now() - lastSync < 5 * 60 * 1000) return;
+      lastSync = Date.now();
+      syncExistingPush(crmApi.subscribePush).catch(() => { lastSync = 0; });
+    };
+    sync();
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', sync);
+    return () => { window.removeEventListener('focus', sync); document.removeEventListener('visibilitychange', sync); };
   }, [auth.status, auth.session?.user?.id]);
 
   useEffect(() => {

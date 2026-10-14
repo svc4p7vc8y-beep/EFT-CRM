@@ -114,8 +114,9 @@ function crm_chat_handle(string $action, string $method): void {
     }
     if ($action === 'chat.list' && $method === 'GET') {
         crm_chat_all_thread();
-        $users = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => $row['display_name'], 'employeeId' => $row['employee_id'] ?: ''],
-            $db->query('SELECT id, display_name, employee_id FROM crm_users WHERE active=1 ORDER BY display_name')->fetchAll());
+        $users = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => $row['display_name'], 'employeeId' => $row['employee_id'] ?: '',
+            'pushDevices' => (int)$row['push_devices'], 'messageNotifications' => (bool)$row['message_enabled']],
+            $db->query('SELECT u.id, u.display_name, u.employee_id, COALESCE(p.message_enabled,1) AS message_enabled, (SELECT COUNT(*) FROM crm_push_subscriptions s WHERE s.user_id=u.id AND s.active=1) AS push_devices FROM crm_users u LEFT JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 ORDER BY u.display_name')->fetchAll());
         $statement = $db->prepare("SELECT t.id, t.thread_type, t.title, t.context_id, t.updated_at, COALESCE(m.last_read_id,0) AS last_read_id, COALESCE(m.last_delivered_id,0) AS last_delivered_id,
             (SELECT CASE WHEN body='' THEN 'Вложение' ELSE body END FROM crm_chat_messages x WHERE x.thread_id=t.id ORDER BY x.id DESC LIMIT 1) AS last_body,
             (SELECT MAX(x.id) FROM crm_chat_messages x WHERE x.thread_id=t.id) AS last_message_id,
@@ -240,7 +241,7 @@ function crm_chat_handle(string $action, string $method): void {
             $db->commit();
         } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); foreach ($stored as $path) @unlink($path); throw $error; }
         crm_audit($userId, 'chat.send', 'chat', $threadId, ['messageId' => $messageId, 'files' => count($attachments)]);
-        try { crm_push_dispatch(12); } catch (Throwable $error) { error_log('EFT CRM chat push failed: ' . $error->getMessage()); }
+        try { crm_push_dispatch(12, 'chat:' . $messageId); } catch (Throwable $error) { error_log('EFT CRM chat push failed: ' . $error->getMessage()); }
         crm_json(['ok' => true, 'message' => ['id' => $messageId, 'threadId' => $threadId, 'authorId' => $userId,
             'authorName' => $user['displayName'], 'body' => $body, 'createdAt' => date('Y-m-d H:i:s'), 'attachments' => $attachments]]);
     }

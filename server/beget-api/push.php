@@ -89,7 +89,7 @@ function crm_push_due_reminders(): int {
     return count($rows);
 }
 
-function crm_push_dispatch(int $limit = 12): int {
+function crm_push_dispatch(int $limit = 12, ?string $eventKey = null): int {
     crm_schema_ensure_v30();
     try { crm_push_library(); $keys = crm_push_keys(); }
     catch (Throwable $error) { error_log('EFT CRM push setup failed: ' . $error->getMessage()); return 0; }
@@ -97,7 +97,11 @@ function crm_push_dispatch(int $limit = 12): int {
     $claimed = [];
     $db->beginTransaction();
     try {
-        $query = $db->query("SELECT id, user_id, kind, title, body, target_path FROM crm_notifications WHERE push_sent_at IS NULL AND push_attempts < 3 AND next_attempt_at <= NOW() ORDER BY id LIMIT " . max(1, min(50, $limit)) . ' FOR UPDATE');
+        $sql = 'SELECT id, user_id, kind, title, body, target_path FROM crm_notifications WHERE push_sent_at IS NULL AND push_attempts < 3 AND next_attempt_at <= NOW()';
+        if ($eventKey !== null) $sql .= ' AND event_key=?';
+        $sql .= ' ORDER BY id LIMIT ' . max(1, min(50, $limit)) . ' FOR UPDATE';
+        $query = $db->prepare($sql);
+        $query->execute($eventKey === null ? [] : [$eventKey]);
         $claimed = $query->fetchAll();
         $mark = $db->prepare('UPDATE crm_notifications SET push_attempts=push_attempts+1, next_attempt_at=DATE_ADD(NOW(), INTERVAL 10 MINUTE) WHERE id=?');
         foreach ($claimed as $row) $mark->execute([(int)$row['id']]);
@@ -107,7 +111,7 @@ function crm_push_dispatch(int $limit = 12): int {
     $webPush = new \Minishlink\WebPush\WebPush(['VAPID' => [
         'subject' => 'mailto:sale@eftsip.ru', 'publicKey' => $keys['public_key'], 'privateKey' => $keys['private_key'],
     ]], ['TTL' => 3600, 'urgency' => 'normal']);
-    $subscriptions = $db->prepare('SELECT id, endpoint, p256dh, auth_key FROM crm_push_subscriptions WHERE user_id=? AND active=1 LIMIT 5');
+    $subscriptions = $db->prepare('SELECT id, endpoint, p256dh, auth_key FROM crm_push_subscriptions WHERE user_id=? AND active=1 ORDER BY updated_at DESC, id DESC LIMIT 20');
     $deactivate = $db->prepare('UPDATE crm_push_subscriptions SET active=0 WHERE id=?');
     $complete = $db->prepare('UPDATE crm_notifications SET push_sent_at=NOW() WHERE id=?');
     $sent = 0;
@@ -122,7 +126,7 @@ function crm_push_dispatch(int $limit = 12): int {
         foreach ($devices as $device) {
             try {
                 $subscription = \Minishlink\WebPush\Subscription::create(['endpoint' => $device['endpoint'], 'keys' => ['p256dh' => $device['p256dh'], 'auth' => $device['auth_key']]]);
-                $report = $webPush->sendOneNotification($subscription, $payload, ['TTL' => 3600, 'urgency' => 'normal']);
+                $report = $webPush->sendOneNotification($subscription, $payload, ['TTL' => $row['kind'] === 'message' ? 86400 : 3600, 'urgency' => $row['kind'] === 'message' ? 'high' : 'normal']);
                 if ($report->isSubscriptionExpired()) $deactivate->execute([(int)$device['id']]);
                 elseif (!$report->isSuccess()) $failed = true;
                 else $sent++;

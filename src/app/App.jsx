@@ -71,6 +71,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const themeKey = `eft-crm-theme:${sessionUser?.username || 'local'}`;
   const [page, setPage] = useState(initialRoute.page); const [search, setSearch] = useState(''); const [selectedLead, setSelectedLead] = useState(initialRoute.leadId); const [selectedSite, setSelectedSite] = useState(initialRoute.siteId); const [chatThreadId, setChatThreadId] = useState(initialRoute.chatId || ''); const [chatContext, setChatContext] = useState(null); const [modal, setModal] = useState(initialRoute.taskId ? { type: 'task', id: initialRoute.taskId } : null); const [toast, setToast] = useState(null); const [sidebar, setSidebar] = useState(false); const [mobileSearch, setMobileSearch] = useState(false); const [now,setNow]=useState(()=>new Date());
   const swipeStart = useRef(null);
+  const seenChatNotifications = useRef(null);
   const [notificationUnread, setNotificationUnread] = useState(0);
   const [theme, setTheme] = useState(() => { const saved = localStorage.getItem(themeKey); return ['light', 'dark', 'brand'].includes(saved) ? saved : 'brand'; });
   const selected = state.leads.find((l) => l.id === selectedLead);
@@ -109,7 +110,27 @@ export function App({ runtime = { mode: 'demo' } }) {
     }
   }
   useEffect(() => { const change = () => { const route = getRoute(); setPage(route.page); setSelectedLead(route.leadId); setSelectedSite(route.siteId); setChatThreadId(route.chatId || ''); if (route.page !== 'chat') setChatContext(null); if (route.taskId) setModal({ type: 'task', id: route.taskId }); setSearch(''); setSidebar(false); setMobileSearch(false); }; window.addEventListener('hashchange', change); return () => window.removeEventListener('hashchange', change); }, []);
-  useEffect(() => { if (!liveSession || !runtime.notifications) return; let active = true; const refresh = () => runtime.notifications().then((result) => { if (active) setNotificationUnread(Number(result.unread || 0)); }).catch(() => {}); refresh(); const timer = window.setInterval(refresh, 60000); const onFocus = () => refresh(); window.addEventListener('focus', onFocus); return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus); }; }, [liveSession, runtime.notifications]);
+  useEffect(() => {
+    if (!liveSession || !runtime.notifications) return undefined;
+    let active = true;
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      runtime.notifications().then((result) => {
+        if (!active) return;
+        setNotificationUnread(Number(result.unread || 0));
+        const chatItems = (result.items || []).filter((item) => item.kind === 'message' && item.target?.startsWith('#chat/'));
+        if (seenChatNotifications.current) {
+          const fresh = chatItems.find((item) => !seenChatNotifications.current.has(item.id));
+          if (fresh) setToast({ text: `${fresh.title}: ${fresh.body}`, error: false, target: fresh.target });
+        }
+        seenChatNotifications.current = new Set(chatItems.map((item) => item.id));
+      }).catch(() => {});
+    };
+    refresh(); const timer = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [liveSession, runtime.notifications]);
   useEffect(() => {
     if (!liveSession) return undefined;
     const refresh = () => { if (document.visibilityState !== 'hidden') refreshData(true); };
@@ -348,6 +369,6 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'attendance' ? <Attendance state={personnelState} command={command} search={search} runtime={runtime} notify={(text,error=false)=>setToast({text,error})}/> : null}
       {page === 'calendar' ? <Calendar state={state} search={search} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'settings' || page === 'crews' ? <StaffSettings key={page} state={personnelState} focus={page === 'crews' ? 'crews' : 'employees'} search={search} onEmployee={(id) => setModal({ type: 'employee-form', id })} onCrew={(id) => setModal({ type: 'crew-form', id })} command={mutate} runtime={runtime} /> : null}
-    </main><nav className="mobile-bottom-nav" aria-label="Быстрый переход" onTouchStart={(event) => beginTabSwipe(event, true)} onTouchEnd={endTabSwipe}><button className={`mobile-more-button ${sidebar || !['chat','tasks','leads','client','communications'].includes(page) ? 'active' : ''}`} aria-label="Открыть остальные разделы" aria-expanded={sidebar} onClick={() => setSidebar(true)}><svg className="mobile-more-mark" viewBox="0 0 28 24" fill="none" aria-hidden="true"><path d="M2 12 10 6 26 15" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 19 10 13 26 22" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="M10 1 26 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg><span>Ещё</span></button>{[['chat','Чат',MessageCircle],['tasks','Задачи',CheckSquare],['leads','Заявки',ClipboardList],['communications','Общение',MessageSquare]].map(([id,label,Icon]) => <button key={id} className={page === id || (page === 'client' && id === 'leads') ? 'active' : ''} aria-current={page === id || (page === 'client' && id === 'leads') ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={21} /><span>{label}</span>{id === 'tasks' && openTaskCount ? <i>{openTaskCount > 99 ? '99+' : openTaskCount}</i> : null}</button>)}</nav></div>{dialog}{toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19} /> : <CircleCheck size={19} />}<span>{toast.text}</span><button className="icon-button" onClick={() => setToast(null)} aria-label="Закрыть уведомление"><X size={15} /></button></div> : null}
+    </main><nav className="mobile-bottom-nav" aria-label="Быстрый переход" onTouchStart={(event) => beginTabSwipe(event, true)} onTouchEnd={endTabSwipe}><button className={`mobile-more-button ${sidebar || !['chat','tasks','leads','client','communications'].includes(page) ? 'active' : ''}`} aria-label="Открыть остальные разделы" aria-expanded={sidebar} onClick={() => setSidebar(true)}><svg className="mobile-more-mark" viewBox="0 0 28 24" fill="none" aria-hidden="true"><path d="M2 12 10 6 26 15" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 19 10 13 26 22" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="M10 1 26 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg><span>Ещё</span></button>{[['chat','Чат',MessageCircle],['tasks','Задачи',CheckSquare],['leads','Заявки',ClipboardList],['communications','Общение',MessageSquare]].map(([id,label,Icon]) => <button key={id} className={page === id || (page === 'client' && id === 'leads') ? 'active' : ''} aria-current={page === id || (page === 'client' && id === 'leads') ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={21} /><span>{label}</span>{id === 'tasks' && openTaskCount ? <i>{openTaskCount > 99 ? '99+' : openTaskCount}</i> : null}</button>)}</nav></div>{dialog}{toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <AlertCircle size={19} /> : <CircleCheck size={19} />}<span>{toast.text}</span>{toast.target ? <button className="text-link" onClick={() => { window.location.hash = toast.target; setToast(null); }}>Открыть</button> : null}<button className="icon-button" onClick={() => setToast(null)} aria-label="Закрыть уведомление"><X size={15} /></button></div> : null}
   </div>;
 }
