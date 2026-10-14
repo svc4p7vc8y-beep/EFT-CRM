@@ -303,7 +303,7 @@ function crm_public_workspace(): array {
             'blockReason' => $row['block_reason'] ?: '', 'checklist' => is_array($checklist) ? $checklist : [],
             'createdAt' => crm_db_datetime($row['created_at'], true), 'originalDueAt' => crm_db_datetime($row['original_due_at']),
             'rescheduleHistory' => is_array($history) ? $history : [],
-            'question' => $question['question'] ?? '', 'answer' => $question['answer'] ?? '',
+            'question' => $question['question'] ?? '', 'answer' => $question['answer'] ?? '', 'questionAskedAt' => crm_db_datetime($question['asked_at'] ?? null, true),
             'questionRequesterId' => (int)($question['requester_user_id'] ?? 0), 'questionRequesterName' => $question['requester_name'] ?? '',
             'answeredByName' => $question['answerer_name'] ?? '', 'answeredAt' => crm_db_datetime($question['answered_at'] ?? null, true),
         ];
@@ -462,7 +462,8 @@ function crm_workspace_for_user(array $user): array {
     $workspace = crm_public_workspace();
     if (crm_can($user, 'integrations.manage')) return $workspace;
     if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) {
-        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== ''));
+        $taskIds = array_fill_keys(array_column($workspace['tasks'], 'id'), true);
+        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== '' || ($activity['taskId'] !== '' && isset($taskIds[$activity['taskId']]))));
         return $workspace;
     }
     $tasks = $workspace['tasks'];

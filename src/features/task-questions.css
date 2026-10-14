@@ -30,3 +30,19 @@
 .task-quick-question textarea { width: 100%; min-height: 76px; padding: 10px 44px 10px 12px; border: 1px solid #cdd9e4; border-radius: 6px; resize: vertical; }
 .task-quick-question small { color: #657487; }
 @media (max-width: 640px) { .task-question { padding: 14px; } .task-question .button { width: 100%; justify-content: center; } }
+.task-story{margin:20px 0;border:1px solid var(--line);border-radius:12px;background:#f5f8f7;overflow:hidden}
+.task-story>header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:15px 17px;border-bottom:1px solid var(--line);background:var(--surface,#fff)}
+.task-story>header h3{margin:0}.task-story>header span{font-size:11px;color:var(--muted)}
+.task-story-list{display:flex;flex-direction:column;gap:12px;max-height:440px;overflow-y:auto;list-style:none;margin:0;padding:18px}
+.task-story-message{display:flex;justify-content:flex-start}.task-story-message.comment,.task-story-message.answer,.task-story-message.completion{justify-content:flex-end}
+.task-story-bubble{max-width:90%;min-width:min(220px,100%);padding:12px 14px;border:1px solid #dce7e2;border-radius:11px 11px 11px 3px;background:#fff;box-shadow:0 2px 7px #142b3b08}
+.task-story-message.comment .task-story-bubble,.task-story-message.answer .task-story-bubble{background:#eaf5e7;border-color:#cfe5cc;border-radius:11px 11px 3px 11px}
+.task-story-message.assignment .task-story-bubble{border-left:3px solid var(--teal)}.task-story-message.completion .task-story-bubble{background:#e4f3e8;border-color:#a8d4b4;border-radius:11px 11px 3px 11px}
+.task-story-message.change{justify-content:center}.task-story-message.change .task-story-bubble{max-width:100%;min-width:0;padding:7px 12px;background:#edf2f4;border:0;border-radius:20px;box-shadow:none;text-align:center}
+.task-story-bubble header{display:flex;justify-content:space-between;gap:14px;align-items:baseline}.task-story-bubble header strong{font-size:12px;color:#245c50}.task-story-bubble header small,.task-story-bubble time{font-size:10px;color:#718796}
+.task-story-bubble p{margin:7px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.5}.task-story-bubble time{display:block;text-align:right}
+.task-story-reply{display:grid;gap:8px;margin:12px 0}.task-story-reply textarea,.task-story-compose textarea,.task-completion textarea{width:100%;min-height:68px;resize:vertical}.task-story-reply .button{justify-self:end}
+.task-story-compose,.task-completion{display:grid;gap:9px;padding:15px 17px;border-top:1px solid var(--line);background:var(--surface,#fff)}.task-story-compose label,.task-completion label{font-size:12px;font-weight:650}.task-story-compose .button,.task-completion .button{justify-self:end}.task-completion{margin-top:16px;border:1px solid var(--line);border-radius:9px}.task-completion small{color:var(--muted);font-size:11px}
+.task-work-controls{padding:3px 0 10px}.task-work-controls h3{margin:12px 0}.task-work-controls h4{font-size:13px;margin:15px 0 10px}.task-work-controls>.field{display:grid;gap:5px;max-width:250px;margin:14px 0}.task-work-controls .checklist{margin-bottom:10px}
+:root[data-theme="dark"] .task-story{background:#17252a}:root[data-theme="dark"] .task-story-bubble{background:#20333a;border-color:#39525a;color:#e5edf2}:root[data-theme="dark"] .task-story-message.comment .task-story-bubble,:root[data-theme="dark"] .task-story-message.answer .task-story-bubble,:root[data-theme="dark"] .task-story-message.completion .task-story-bubble{background:#244435;border-color:#416a4c}:root[data-theme="dark"] .task-story-message.change .task-story-bubble{background:#2b3c45}
+@media(max-width:640px){.task-story>header{display:block}.task-story>header span{display:block;margin-top:4px}.task-story-list{padding:12px;max-height:50dvh}.task-story-bubble{max-width:96%}.task-story-compose .button,.task-completion .button{width:100%}}

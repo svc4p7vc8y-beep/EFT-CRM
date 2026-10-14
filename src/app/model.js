@@ -115,7 +115,7 @@ export function applyCommand(current, action, payload = {}) {
   } else if (action === 'activity.create') {
     if (!state.sites.some((v) => v.id === payload.siteId) && !state.tasks.some((t) => t.id === payload.taskId && !t.orderId)) throw new Error('Выберите объект');
     if (!ACTIVITY_TYPES[payload.type] || payload.type === 'system') throw new Error('Выберите вид общения');
-    log(state, payload.siteId, requireText(payload.text, 'Результат общения'), payload.taskId || '', payload.type);
+    log(state, payload.siteId, requireText(payload.text, 'Результат общения'), payload.taskId || '', payload.type, payload.authorId || 'manager-1');
   } else if (action === 'order.create') {
     const lead = state.leads.find((v) => v.id === payload.leadId); if (!lead) throw new Error('Заявка не найдена');
     if (state.orders.some((v) => v.leadId === lead.id)) throw new Error('Эта заявка уже передана в производство');
@@ -140,7 +140,7 @@ export function applyCommand(current, action, payload = {}) {
     const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason', 'question'].includes(key))) };
     next.title = requireText(next.title, 'Название задания'); next.description = text(next.description); next.unit = requireText(next.unit, 'Единица'); next.blockReason = text(next.blockReason);
     next.question = text(next.question, 5000);
-    if (next.question !== (task.question || '')) { next.answer = ''; next.answeredAt = ''; next.answeredByName = ''; next.questionRequesterName = String(payload.questionRequesterName || 'Автор вопроса'); }
+    if (next.question !== (task.question || '')) { next.answer = ''; next.answeredAt = ''; next.answeredByName = ''; next.questionAskedAt = new Date().toISOString(); next.questionRequesterName = String(payload.questionRequesterName || 'Автор вопроса'); }
     if (next.question && !next.assigneeId) throw new Error('Для вопроса выберите исполнителя');
     if (next.orderId && !state.orders.some((v) => v.id === next.orderId)) throw new Error('Выберите заказ');
     const orderSiteId = state.orders.find((value) => value.id === next.orderId)?.siteId || '';
@@ -214,6 +214,15 @@ export function applyCommand(current, action, payload = {}) {
     const next = { id: existing?.id || uid(), name, specialty: text(payload.specialty, 100), leadId: payload.leadId || '', memberIds, phone: text(payload.phone, 60), notes: text(payload.notes, 2000), active: payload.active !== false && payload.active !== 'false' };
     if (next.leadId && !memberIds.includes(next.leadId)) throw new Error('Бригадир должен входить в состав бригады');
     if (existing) Object.assign(existing, next); else state.crews.push(next);
+  } else if (action === 'task.complete') {
+    const task = state.tasks.find((value) => value.id === payload.id); if (!task) throw new Error('Задание не найдено');
+    if (task.status === 'done') throw new Error('Задание уже завершено');
+    if (task.question && !task.answer) throw new Error('Сначала ответьте на вопрос');
+    if (task.checklist.some((item) => !item.done)) throw new Error('Выполните все пункты чек-листа');
+    const result = requireText(payload.text, 'Результат выполнения').slice(0, 5000);
+    task.status = 'done'; task.completedQty = task.quantity; task.blockReason = '';
+    const siteId = task.siteId || state.orders.find((order) => order.id === task.orderId)?.siteId || '';
+    state.activities.unshift({ id: uid(), siteId, taskId: task.id, type: 'note', channel: 'note', direction: 'internal', subject: 'completion', externalKey: '', text: result, authorId: payload.authorId || 'manager-1', createdAt: new Date().toISOString(), read: true, attachments: [] });
   } else if (action === 'task.answer') {
     const task = state.tasks.find((value) => value.id === payload.id); if (!task || !task.question) throw new Error('Вопрос к задаче не найден');
     if (task.answer) throw new Error('Ответ уже отправлен');

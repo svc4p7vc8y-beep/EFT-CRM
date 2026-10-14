@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, List, Columns3, Clock3, AlertCircle, CheckSquare, MoreVertical, ArrowRight } from 'lucide-react';
-import { Avatar, Badge, Empty, PageHeading, Timeline, VoiceInput } from '../components/UI.jsx';
+import { Avatar, Badge, Empty, PageHeading, VoiceInput } from '../components/UI.jsx';
 import './task-questions.css';
 import { TASK_STAGES, dateKey, dateLabel, employee, isOverdue, taskContext } from '../app/model.js';
+import { taskStory } from './taskStory.js';
 
 function TaskCard({ state, task, onOpen }) { const { order, site } = taskContext(state, task); const percent = Math.round(task.completedQty / task.quantity * 100); return <article className={`task-card ${task.status === 'blocked' ? 'blocked-card' : ''}`} draggable onDragStart={(e) => { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; }}><button className="task-card-title" onClick={() => onOpen(task.id)}><strong>{task.title}</strong><MoreVertical size={16} /></button><p className="task-order">Заказ {order?.number || 'Общая задача'}{site ? ` · ${site.name}` : ''}</p>{task.status === 'blocked' ? <div className="block-reason"><AlertCircle size={16} />{task.blockReason}</div> : task.status === 'review' ? <Badge color="blue">Ожидает приёмки</Badge> : task.status === 'doing' ? <><p className="task-quantity">{task.completedQty} из {task.quantity} {task.unit} готово</p><div className="progress-row"><progress value={percent} max="100" /><span>{percent}%</span></div></> : <p className="task-quantity">{task.quantity} {task.unit}</p>}{task.question ? <span className={`task-question-inline ${task.answer ? 'answered' : ''}`}>{task.answer ? 'Ответ получен' : 'Ждёт ответа'}</span> : null}<div className="task-meta"><span><CheckSquare size={16} />{task.checklist.filter((c) => c.done).length}/{task.checklist.length}</span>{task.priority === 'high' ? <span className="amber-text">Высокий приоритет</span> : null}</div><div className="task-footer"><span><Avatar id={task.assigneeId} state={state} />{employee(task.assigneeId, state)?.name || 'Не назначен'}</span><span className={isOverdue(task.dueAt) ? 'amber-text' : ''}><Clock3 size={14} />{dateLabel(task.dueAt)}</span></div></article>; }
 export function Production({ state, search, onCreate, onOpen, onMove, initialOrder = '', mine = false, quick = null }) {
@@ -14,34 +15,43 @@ export function Production({ state, search, onCreate, onOpen, onMove, initialOrd
     {!mine ? <section className="workload"><h2>Загрузка на сегодня</h2><div className="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Задач на сегодня</th><th>Состояние работ</th><th>Текущая задача</th></tr></thead><tbody>{state.employees.filter((p) => p.active && (mine || p.role === 'Цех')).map((p) => { const items = state.tasks.filter((t) => t.assigneeId === p.id && t.dueAt.slice(0, 10) === dateKey() && t.status !== 'done'); const active = items.find((t) => t.status === 'doing') || items[0]; return <tr key={p.id}><td><span className="person-cell"><Avatar id={p.id} state={state} />{p.name}</span></td><td>{items.length}</td><td>{items.some((t) => t.status === 'blocked') ? <Badge color="amber">Есть блокировка</Badge> : items.length ? <Badge color="blue">Есть задания</Badge> : <span className="muted">Свободен</span>}</td><td>{active ? <button className="text-link" onClick={() => onOpen(active.id)}>{active.title}<ArrowRight size={14} /></button> : '—'}</td></tr>; })}</tbody></table></div></section> : null}<div className="page-footnote">Перемещайте карточки между колонками или меняйте статус внутри задания.</div>
   </section>;
 }
-export function TaskDetail({ state, task, onEdit, onCheck, onMove, onComment, onAnswer, onChat }) {
+export function TaskDetail({ state, task, onEdit, onCheck, onMove, onComment, onComplete, onAnswer }) {
   const [check, setCheck] = useState('');
   const [comment, setComment] = useState('');
   const [answer, setAnswer] = useState('');
-  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState('');
+  const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const { order, site } = taskContext(state, task);
-  function submitCheck(e) { e.preventDefault(); if (onCheck?.({ id: task.id, title: check })) setCheck(''); }
-  async function submitAnswer(e) {
-    e.preventDefault();
-    setError(''); setSending(true);
-    try { await onAnswer(answer.trim()); setAnswer(''); } catch (err) { setError(err.message || 'Не удалось отправить ответ'); }
-    finally { setSending(false); }
+  const story = useMemo(() => taskStory(task, state.activities), [task, state.activities]);
+  const storyList = useRef(null);
+  const previousStoryLength = useRef(story.length);
+  useEffect(() => {
+    if (story.length > previousStoryLength.current && storyList.current) storyList.current.scrollTop = storyList.current.scrollHeight;
+    previousStoryLength.current = story.length;
+  }, [story.length]);
+  const readyToComplete = !task.checklist.some((item) => !item.done) && (!task.question || Boolean(task.answer));
+  async function submitCheck(event) { event.preventDefault(); setError(''); try { await onCheck?.({ id: task.id, title: check }); setCheck(''); } catch (failure) { setError(failure.message || 'Не удалось обновить чек-лист'); } }
+  async function toggleCheck(checkId) { setError(''); try { await onCheck?.({ id: task.id, checkId }); } catch (failure) { setError(failure.message || 'Не удалось обновить чек-лист'); } }
+  async function submit(event, kind, callback, value, clear) {
+    event.preventDefault(); setError(''); setPending(kind);
+    try { await callback(value.trim()); clear(''); } catch (failure) { setError(failure.message || 'Не удалось сохранить сообщение'); }
+    finally { setPending(''); }
   }
   return <div className="task-detail">
-    <div className="task-detail-summary"><Badge stages={TASK_STAGES} value={task.status} /><span>{order?.number || 'Общая задача'}{site ? ` · ${site.name}` : ''}</span>{onEdit ? <button className="text-link" onClick={onEdit}>Редактировать</button> : null}</div>
-    {onChat ? <button className="button task-chat-open" onClick={() => onChat(task.id)}>Открыть чат по задаче</button> : null}
-    <p className="preserve-lines">{task.description}</p>
+    <div className="task-detail-summary"><Badge stages={TASK_STAGES} value={task.status} /><span>{order?.number || 'Общая задача'}{site ? ` · ${site.name}` : ''}</span>{onEdit ? <button className="text-link" onClick={onEdit}>Редактировать постановку</button> : null}</div>
     <div className="task-detail-facts"><span><Avatar id={task.assigneeId} state={state} />{employee(task.assigneeId, state)?.name || 'Не назначен'}</span><span><Clock3 size={16} />{dateLabel(task.dueAt)}</span><span>{task.completedQty} / {task.quantity} {task.unit}</span></div>
-    {task.question ? <section className="task-question" aria-label="Вопрос исполнителю"><div className="task-question-head"><h3>Вопрос исполнителю</h3><span className={`task-question-state ${task.answer ? 'answered' : ''}`}>{task.answer ? 'Ответ получен' : 'Ждёт ответа'}</span></div><p className="preserve-lines">{task.question}</p>{task.questionRequesterName ? <small>Спросил: {task.questionRequesterName}</small> : null}
-      {task.answer ? <div className="task-answer"><strong>Ответ</strong><p className="preserve-lines">{task.answer}</p><small>{task.answeredByName || 'Сотрудник'}{task.answeredAt ? ` · ${dateLabel(task.answeredAt)}` : ''}</small></div> : onAnswer ? <form onSubmit={submitAnswer}><label className="field"><span>Ваш ответ</span><VoiceInput><textarea value={answer} onChange={(e) => setAnswer(e.target.value)} maxLength={5000} required placeholder="Напишите или продиктуйте ответ…" /></VoiceInput></label><button className="button primary" type="submit" disabled={sending || !answer.trim()}>{sending ? 'Отправляем…' : 'Отправить ответ автору вопроса'}</button></form> : <p className="muted">Ответить может назначенный исполнитель.</p>}
-    </section> : null}
-    {task.status === 'blocked' ? <div className="block-reason"><AlertCircle size={17} />{task.blockReason}</div> : null}
-    {onMove ? <label className="field"><span>Статус задания</span><select value={task.status} onChange={(e) => onMove(task.id, e.target.value)}>{TASK_STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label> : null}
-    <h3>Чек-лист</h3><div className="checklist">{task.checklist.map((item) => <label className="check-row" key={item.id}><input type="checkbox" checked={item.done} disabled={!onCheck || task.status === 'done'} onChange={() => onCheck?.({ id: task.id, checkId: item.id })} /><span>{item.title}</span></label>)}</div>
-    {onCheck && task.status !== 'done' ? <form className="inline-form" onSubmit={submitCheck}><VoiceInput><input value={check} onChange={(e) => setCheck(e.target.value)} placeholder="Новый пункт чек-листа" aria-label="Новый пункт чек-листа" required maxLength={500} /></VoiceInput><button className="button" type="submit"><Plus size={16} />Добавить</button></form> : null}
+    <section className="task-story" aria-label="История задачи"><header><h3>Ход задачи</h3><span>Постановка, обсуждение и результат</span></header>
+      <ol className="task-story-list" ref={storyList}>{story.map((entry) => <li key={entry.id} className={`task-story-message ${entry.kind}`}><div className="task-story-bubble"><header><strong>{entry.title}</strong><small>{entry.authorName || employee(entry.authorId, state)?.name || (entry.kind === 'assignment' ? 'Постановка задачи' : 'ЭФТ')}</small></header><p>{entry.text}</p>{entry.kind === 'question' && !task.answer && onAnswer ? <form className="task-story-reply" onSubmit={(event) => submit(event, 'answer', onAnswer, answer, setAnswer)}><VoiceInput><textarea value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={5000} required placeholder="Ответить на вопрос…" aria-label="Ответ на вопрос" /></VoiceInput><button className="button primary" disabled={Boolean(pending) || !answer.trim()}>{pending === 'answer' ? 'Отправляем…' : 'Ответить'}</button></form> : null}<time>{entry.at ? dateLabel(entry.at) : ''}</time></div></li>)}</ol>
+      {onComment ? <form className="task-story-compose" onSubmit={(event) => submit(event, 'comment', onComment, comment, setComment)}><label htmlFor="task-comment">Комментарий по ходу работы</label><VoiceInput><textarea id="task-comment" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Что сделано, что мешает, что нужно уточнить…" rows={2} required maxLength={5000} /></VoiceInput><button className="button primary" disabled={Boolean(pending) || !comment.trim()}>{pending === 'comment' ? 'Отправляем…' : 'Отправить комментарий'}</button></form> : null}
+    </section>
+    {error ? <p className="form-error" role="alert">{error}</p> : null}
+    <section className="task-work-controls"><h3>Выполнение</h3>{task.status === 'blocked' ? <div className="block-reason"><AlertCircle size={17} />{task.blockReason}</div> : null}
+      {onMove && task.status !== 'done' ? <label className="field"><span>Этап работы</span><select value={task.status} onChange={(event) => onMove(task.id, event.target.value)}>{TASK_STAGES.filter((stage) => stage.id !== 'done').map((stage) => <option key={stage.id} value={stage.id}>{stage.label}</option>)}</select></label> : null}
+      {task.checklist.length ? <><h4>Чек-лист</h4><div className="checklist">{task.checklist.map((item) => <label className="check-row" key={item.id}><input type="checkbox" checked={item.done} disabled={!onCheck || task.status === 'done'} onChange={() => toggleCheck(item.id)} /><span>{item.title}</span></label>)}</div></> : null}
+      {onCheck && task.status !== 'done' ? <form className="inline-form" onSubmit={submitCheck}><VoiceInput><input value={check} onChange={(event) => setCheck(event.target.value)} placeholder="Добавить пункт проверки" aria-label="Новый пункт чек-листа" required maxLength={500} /></VoiceInput><button className="button" type="submit"><Plus size={16} />Добавить</button></form> : null}
+      {onComplete && task.status !== 'done' ? <form className="task-completion" onSubmit={(event) => submit(event, 'complete', onComplete, result, setResult)}><label htmlFor="task-result">Результат выполнения</label><VoiceInput><textarea id="task-result" value={result} onChange={(event) => setResult(event.target.value)} placeholder="Напишите, что именно выполнено и какой результат получен" rows={3} required maxLength={5000} /></VoiceInput>{!readyToComplete ? <small>Перед завершением ответьте на вопрос и отметьте все пункты чек-листа.</small> : null}<button className="button primary" disabled={Boolean(pending) || !readyToComplete || !result.trim()}>{pending === 'complete' ? 'Сохраняем…' : 'Сохранить результат и завершить'}</button></form> : null}
+    </section>
     {order ? <details className="order-spec"><summary>Согласованная комплектация · {order.number}</summary><p>{order.scope}</p><small>{order.reference || 'Спецификация введена вручную'}</small></details> : null}
-    <h3>Обсуждение и история</h3>{onComment ? <form className="inline-form" onSubmit={(e) => { e.preventDefault(); setError(''); try { onComment({ siteId: site?.id || '', taskId: task.id, type: 'note', text: comment }); setComment(''); } catch (err) { setError(err.message); } }}><VoiceInput><input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Добавить комментарий" aria-label="Комментарий к заданию" required maxLength={5000} /></VoiceInput><button className="button" type="submit">Добавить</button></form> : null}
-    {error ? <p className="form-error" role="alert">{error}</p> : null}<Timeline state={state} events={state.activities.filter((a) => a.taskId === task.id).slice(0, 20)} compact />
   </div>;
 }

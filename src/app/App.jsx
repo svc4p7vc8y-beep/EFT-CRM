@@ -50,6 +50,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const revisionRef = useRef(Number(runtime.serverData?.workspaceRevision || 0));
   const inventoryRevisionRef = useRef(Number(runtime.serverData?.inventoryRevision || 0));
   const saveQueue = useRef(Promise.resolve());
+  const taskActionQueue = useRef(Promise.resolve());
   const inventorySaveQueue = useRef(Promise.resolve());
   const refreshInFlight = useRef(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -269,7 +270,19 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
-  function moveTask(id, status) { if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
+  function moveTask(id, status) { if (status === 'done') setModal({ type: 'task', id }); else if (status === 'blocked') setModal({ type: 'task-edit', id, status }); else safeMutate('task.update', { id, status }, 'Статус задания обновлён'); }
+  function runTaskAction(request) {
+    const operation = taskActionQueue.current.then(async () => {
+      await saveQueue.current;
+      const result = await request();
+      mutationGeneration.current++;
+      revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current);
+      setServerOverride(result.workspace);
+      return result;
+    });
+    taskActionQueue.current = operation.catch(() => undefined);
+    return operation;
+  }
   async function answerTask(id, answer) {
     if (liveSession) {
       const result = await runtime.answerTask(id, answer);
@@ -277,6 +290,26 @@ export function App({ runtime = { mode: 'demo' } }) {
       setServerOverride(result.workspace);
     } else mutate('task.answer', { id, answer }, 'Ответ сохранён');
     setToast({ text: 'Ответ отправлен автору вопроса', error: false });
+  }
+  async function commentTask(id, text) {
+    const task = state.tasks.find((item) => item.id === id);
+    if (!task) throw new Error('Задача не найдена');
+    if (liveSession) {
+      await runTaskAction(() => runtime.commentTask(id, text));
+    } else mutate('activity.create', { siteId: task.siteId || state.orders.find((item) => item.id === task.orderId)?.siteId || '', taskId: id, type: 'note', text, authorId: sessionUser?.employeeId || 'manager-1' }, 'Комментарий добавлен');
+    setToast({ text: 'Комментарий добавлен', error: false });
+  }
+  async function completeTask(id, text) {
+    if (liveSession) {
+      await runTaskAction(() => runtime.completeTask(id, text));
+    } else mutate('task.complete', { id, text, authorId: sessionUser?.employeeId || 'manager-1' }, 'Задача завершена');
+    setToast({ text: 'Результат сохранён, задача завершена', error: false });
+  }
+  async function checkTask(payload) {
+    if (liveSession) {
+      await runTaskAction(() => runtime.checkTask(payload.id, payload.checkId || '', payload.title || ''));
+    } else mutate('task.check', payload, 'Чек-лист обновлён');
+    return true;
   }
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
@@ -286,7 +319,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   if (modal?.type === 'activity') dialog = <Dialog title="Записать общение" onClose={closeModal}><ActivityForm state={state} siteId={modal.siteId} onClose={closeModal} onSubmit={(p) => { mutate('activity.create', p, 'Запись добавлена в историю'); closeModal(); }} /></Dialog>;
   if (modal?.type === 'order' && modalLead) dialog = <Dialog title="Передать заказ в производство" onClose={closeModal}><OrderForm state={state} onClose={closeModal} onSubmit={(p) => { mutate('order.create', { ...p, leadId: modal.id }, 'Созданы заказ и первое задание цеху'); closeModal(); }} /></Dialog>;
   if (modal?.type === 'task-new' || (modal?.type === 'task-edit' && modalTask)) dialog = <Dialog key={`${modal.type}-${modal.id}`} title={modal.type === 'task-new' ? 'Новое задание' : 'Изменить задание'} onClose={closeModal}><TaskForm state={state} task={modalTask ? { ...modalTask, status: modal.status || modalTask.status } : null} defaults={canManageTasks ? modal : { ...modal, assigneeId: sessionUser?.employeeId }} ownTaskOnly={!canManageTasks} onClose={closeModal} onSubmit={async (p) => { const data = { ...p, id: modal.id, questionRequesterName: sessionUser?.displayName || 'Автор вопроса' }; if (modal.type === 'task-new') { const next = await createTask(data); setModal({ type: 'task', id: next.createdTaskId || next.tasks[0]?.id }); } else { mutate('task.update', data, 'Задание сохранено'); setModal({ type: 'task', id: modal.id }); } }} /></Dialog>;
-  if (modal?.type === 'task' && modalTask) dialog = <Dialog title={modalTask.title} onClose={closeModal} wide><TaskDetail state={state} task={modalTask} onEdit={canSaveWorkspace ? () => setModal({ type: 'task-edit', id: modalTask.id }) : null} onCheck={canSaveWorkspace ? (p) => safeMutate('task.check', p, 'Чек-лист обновлён') : null} onMove={canSaveWorkspace ? moveTask : null} onComment={canSaveWorkspace ? (p) => mutate('activity.create', p, 'Комментарий добавлен') : null} onAnswer={(!liveSession || canSaveWorkspace || (Boolean(modalTask.assigneeId) && sessionUser?.employeeId === modalTask.assigneeId)) ? (answer) => answerTask(modalTask.id, answer) : null} onChat={(id) => openContextChat('task', id)} /></Dialog>;
+  if (modal?.type === 'task' && modalTask) dialog = <Dialog title={modalTask.title} onClose={closeModal} wide><TaskDetail state={state} task={modalTask} onEdit={canSaveWorkspace ? () => setModal({ type: 'task-edit', id: modalTask.id }) : null} onCheck={(!liveSession || canManageTasks || sessionUser?.employeeId === modalTask.assigneeId) ? checkTask : null} onMove={canSaveWorkspace ? moveTask : null} onComment={(!liveSession || canManageTasks || sessionUser?.employeeId === modalTask.assigneeId) ? (text) => commentTask(modalTask.id, text) : null} onComplete={(!liveSession || canManageTasks || sessionUser?.employeeId === modalTask.assigneeId) ? (text) => completeTask(modalTask.id, text) : null} onAnswer={(!liveSession || canSaveWorkspace || (Boolean(modalTask.assigneeId) && sessionUser?.employeeId === modalTask.assigneeId)) ? (answer) => answerTask(modalTask.id, answer) : null} /></Dialog>;
   if (modal?.type === 'data') dialog = <Dialog title="Данные на этом устройстве" onClose={closeModal}><DataTools state={state} replace={replace} onClose={closeModal} /></Dialog>;
   if (modal?.type === 'profile') dialog = <Dialog title="Рабочий аккаунт" onClose={closeModal}><div className="form-content account-summary"><span className="profile-avatar">{initials(sessionUser?.displayName)}</span><div><strong>{sessionUser?.displayName}</strong><span>{roleLabels[sessionUser?.role] || sessionUser?.role}</span><small>Логин: {sessionUser?.username}</small></div><p><ShieldCheck size={17} />Сессия защищена. Права доступа назначаются администратором CRM.</p></div><footer className="dialog-actions"><button className="button" onClick={closeModal}>Закрыть</button><button className="button logout-button" onClick={runtime.onLogout}><LogOut size={16} />Выйти</button></footer></Dialog>;
   if (modal?.type === 'employee-form') dialog = <Dialog key={`employee-${modal.id || 'new'}`} title={modal.id ? 'Редактировать сотрудника' : 'Новый сотрудник'} onClose={closeModal}><EmployeeForm person={personnelState.employees.find((p) => p.id === modal.id)} serverMode={liveSession} onClose={closeModal} onSubmit={async (p) => { if (liveSession) await runtime.saveEmployee({ ...p, id: modal.id }); else mutate('employee.save', { ...p, id: modal.id }, 'Сотрудник сохранён'); setToast({ text: 'Сотрудник сохранён', error: false }); closeModal(); }} /></Dialog>;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCommand, createDemoState, validateState } from '../src/app/model.js';
 import { briefFromForm, calculatorBrief } from '../src/app/buildingBrief.js';
+import { taskStory } from '../src/features/taskStory.js';
 
 test('непривязанный MAX-диалог сохраняется в неразобранных', () => {
   const state = createDemoState();
@@ -65,6 +66,19 @@ test('вопрос требует исполнителя, ответ сохра�
   state = applyCommand(state, 'task.update', { id, question: 'Сколько коробок?' });
   assert.equal(state.tasks[0].answer, '');
   assert.equal(state.tasks[0].question, 'Сколько коробок?');
+});
+test('результат завершения остаётся в ленте задачи и требует закрытого чек-листа', () => {
+  let state = createDemoState();
+  assert.throws(() => applyCommand(state, 'task.complete', { id: 'task-1', text: 'Готово' }), /чек-листа/);
+  for (const item of state.tasks[0].checklist) state = applyCommand(state, 'task.check', { id: 'task-1', checkId: item.id });
+  assert.throws(() => applyCommand(state, 'task.complete', { id: 'task-1', text: ' ' }), /Результат выполнения/);
+  state = applyCommand(state, 'task.complete', { id: 'task-1', text: 'Собраны 38 панелей, размеры проверены', authorId: 'worker-1' });
+  assert.equal(state.tasks[0].status, 'done');
+  assert.equal(state.tasks[0].completedQty, state.tasks[0].quantity);
+  const story = taskStory(state.tasks[0], state.activities);
+  assert.equal(story.at(-1).kind, 'completion');
+  assert.equal(story.at(-1).text, 'Собраны 38 панелей, размеры проверены');
+  assert.doesNotThrow(() => validateState(state));
 });
 test('параметры новой заявки сохраняются на объекте и передаются в анкету калькулятора', () => {
   const buildingBrief = briefFromForm({ 'brief.buildingType': 'Баня', 'brief.length': '8', 'brief.width': '6', 'brief.floors': '1', 'brief.wallHeight': '2.5', 'brief.wallThickness': '174 мм', 'brief.roofShape': 'Двускатная', 'brief.roofType': 'Тёплая SIP', 'brief.scope.2': 'on', 'brief.scope.5': 'on' });
