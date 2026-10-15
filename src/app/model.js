@@ -40,6 +40,7 @@ export const CONSTRUCTION_TEMPLATES = [
 ].map(([group, title, duration], index) => ({ id: `construction-${index + 1}`, group, title, duration }));
 export const STAFF_ROLES = ['Менеджер', 'Сметчик', 'Руководитель', 'Начальник цеха', 'Цех', 'Бригадир', 'Монтажник', 'Электрик', 'Сантехник', 'Плиточник', 'Снабженец', 'Кладовщик', 'Логист', 'Администратор', 'Другое'];
 export const employee = (id, state) => (state?.employees || EMPLOYEES).find((person) => person.id === id);
+export const taskAssigneeNames = (task, state) => (task.assigneeIds || (task.assigneeId ? [task.assigneeId] : [])).map((id) => employee(id, state)?.name).filter(Boolean).join(', ') || 'Не назначены';
 export const activeStaff = (state) => state.employees.filter((person) => person.active !== false);
 export const officeStaff = (state) => activeStaff(state).filter((person) => !['Цех', 'Бригадир', 'Монтажник', 'Электрик', 'Сантехник', 'Плиточник'].includes(person.role));
 export const workshopStaff = (state) => activeStaff(state).filter((person) => person.role === 'Цех');
@@ -89,7 +90,7 @@ export function createDemoState() {
   return extendWorkspace({ schemaVersion: 1, revision: 0, clients, sites, leads, orders, tasks, activities, employees, crews, constructionStages, logistics });
 }
 
-function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1', subject = '') { const channel = type === 'email' ? 'email' : type === 'call' ? 'call' : type === 'message' ? 'telegram' : type === 'system' ? 'system' : 'note'; state.activities.unshift({ id: uid(), siteId, taskId, type, channel, direction: ['system','note','call'].includes(channel) ? 'internal' : 'outgoing', subject, externalKey: '', text: message, authorId, createdAt: new Date().toISOString(), read: true, attachments: [] }); }
+function log(state, siteId, message, taskId = '', type = 'system', authorId = 'manager-1', subject = '', recipientIds = []) { const channel = type === 'email' ? 'email' : type === 'call' ? 'call' : type === 'message' ? 'telegram' : type === 'system' ? 'system' : 'note'; state.activities.unshift({ id: uid(), siteId, taskId, type, channel, direction: ['system','note','call'].includes(channel) ? 'internal' : 'outgoing', subject, externalKey: '', text: message, authorId, recipientIds, createdAt: new Date().toISOString(), read: true, attachments: [] }); }
 export function applyCommand(current, action, payload = {}) {
   const state = extendWorkspace(structuredClone(current));
   if (applyOperation(state, action, payload)) { /* Operation committed below with shared validation. */ }
@@ -98,7 +99,7 @@ export function applyCommand(current, action, payload = {}) {
     if (!client) { client = { id: uid(), name: requireText(payload.name, 'Клиент'), phone: text(payload.phone, 60), email: text(payload.email, 200) }; state.clients.push(client); }
     const site = { id: uid(), clientId: client.id, name: requireText(payload.siteName, 'Объект'), address: text(payload.address, 500), buildingBrief: normalizeBuildingBrief(payload.buildingBrief) };
     state.sites.push(site);
-    const lead = { id: uid(), siteId: site.id, status: 'new', ownerId: payload.ownerId || 'manager-1', nextAction: requireText(payload.nextAction, 'Следующий шаг'), dueAt: validDue(payload.dueAt), source: text(payload.source, 100) || 'Вручную', notes: text(payload.notes), createdAt: new Date().toISOString() };
+    const lead = { id: uid(), siteId: site.id, status: 'new', ownerId: payload.ownerId || 'manager-1', nextAction: requireText(payload.nextAction, 'Следующий шаг'), dueAt: validDue(payload.dueAt), source: text(payload.source, 100) || 'Вручную', notes: text(payload.notes), checklist: [], createdAt: new Date().toISOString() };
     state.leads.unshift(lead); log(state, site.id, 'Создана заявка');
   } else if (action === 'lead.update') {
     const lead = state.leads.find((v) => v.id === payload.id); if (!lead) throw new Error('Заявка не найдена');
@@ -115,7 +116,15 @@ export function applyCommand(current, action, payload = {}) {
   } else if (action === 'activity.create') {
     if (!state.sites.some((v) => v.id === payload.siteId) && !state.tasks.some((t) => t.id === payload.taskId && !t.orderId)) throw new Error('Выберите объект');
     if (!ACTIVITY_TYPES[payload.type] || payload.type === 'system') throw new Error('Выберите вид общения');
-    log(state, payload.siteId, requireText(payload.text, 'Результат общения'), payload.taskId || '', payload.type, payload.authorId || 'manager-1');
+    const recipients = [...new Set(Array.isArray(payload.recipientIds) ? payload.recipientIds : [])].filter(Boolean);
+    if (recipients.some((id) => !state.employees.some((person) => person.id === id))) throw new Error('Получатель не найден');
+    log(state, payload.siteId, requireText(payload.text, 'Результат общения'), payload.taskId || '', payload.type, payload.authorId || 'manager-1', payload.subject || '', recipients);
+  } else if (action === 'lead.check') {
+    const lead = state.leads.find((item) => item.id === payload.id); if (!lead) throw new Error('Заявка не найдена');
+    let title = text(payload.title, 500); let subject = 'checklist.added';
+    if (payload.checkId) { const item = lead.checklist.find((value) => value.id === payload.checkId); if (!item) throw new Error('Пункт чек-листа не найден'); item.done = !item.done; title = item.title; subject = item.done ? 'checklist.done' : 'checklist.reopened'; }
+    else { title = requireText(title, 'Пункт чек-листа'); lead.checklist.push({ id: uid(), title, done: false }); }
+    log(state, lead.siteId, subject === 'checklist.done' ? `Выполнен пункт чек-листа: ${title}` : subject === 'checklist.reopened' ? `Пункт возвращён в работу: ${title}` : `Добавлен пункт чек-листа: ${title}`, '', 'system', payload.authorId || 'manager-1', subject);
   } else if (action === 'order.create') {
     const lead = state.leads.find((v) => v.id === payload.leadId); if (!lead) throw new Error('Заявка не найдена');
     if (state.orders.some((v) => v.leadId === lead.id)) throw new Error('Эта заявка уже передана в производство');
@@ -137,11 +146,14 @@ export function applyCommand(current, action, payload = {}) {
     if (action === 'task.update' && !existing) throw new Error('Задание не найдено');
     const template = state.taskTemplates.find((t) => t.id === payload.templateId);
     const task = existing || { id: uid(), createdAt: new Date().toISOString(), createdByName: String(payload.createdByName || 'Автор не указан'), checklist: (template?.checklist || []).map((title) => ({ id: uid(), title, done: false })), status: 'planned', completedQty: 0, blockReason: '', orderId: '', siteId: '', constructionStageId: '', crewId: '', originalDueAt: '', rescheduleHistory: [], question: '', answer: '', answeredAt: '' };
-    const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason', 'question'].includes(key))) };
+    const next = { ...task, ...Object.fromEntries(Object.entries(payload).filter(([key]) => ['title', 'description', 'orderId', 'siteId', 'constructionStageId', 'crewId', 'assigneeId', 'assigneeIds', 'status', 'priority', 'dueAt', 'quantity', 'completedQty', 'unit', 'blockReason', 'question'].includes(key))) };
+    next.assigneeIds = [...new Set((Array.isArray(payload.assigneeIds) ? payload.assigneeIds : payload.assigneeId !== undefined ? [payload.assigneeId] : task.assigneeIds || (task.assigneeId ? [task.assigneeId] : [])).filter(Boolean))];
+    if (next.assigneeIds.some((id) => !state.employees.some((person) => person.id === id))) throw new Error('Исполнитель не найден');
+    next.assigneeId = next.assigneeIds[0] || '';
     next.title = requireText(next.title, 'Название задания'); next.description = text(next.description); next.unit = requireText(next.unit, 'Единица'); next.blockReason = text(next.blockReason);
     next.question = text(next.question, 5000);
     if (next.question !== (task.question || '')) { next.answer = ''; next.answeredAt = ''; next.answeredByName = ''; next.questionAskedAt = new Date().toISOString(); next.questionRequesterName = String(payload.questionRequesterName || 'Автор вопроса'); }
-    if (next.question && !next.assigneeId) throw new Error('Для вопроса выберите исполнителя');
+    if (next.question && !next.assigneeIds.length) throw new Error('Для вопроса выберите исполнителя');
     if (next.orderId && !state.orders.some((v) => v.id === next.orderId)) throw new Error('Выберите заказ');
     const orderSiteId = state.orders.find((value) => value.id === next.orderId)?.siteId || '';
     next.siteId = next.siteId || orderSiteId;
@@ -166,6 +178,7 @@ export function applyCommand(current, action, payload = {}) {
       const display = (value) => key === 'status' ? TASK_STAGES.find((stage) => stage.id === value)?.label || value : key === 'assigneeId' ? state.employees.find((person) => person.id === value)?.name || 'Не назначен' : String(value ?? '').trim().slice(0, 90) || 'Не указано';
       return `${label}: ${display(existing[key])} → ${display(next[key])}`;
     }) : [];
+    if (existing && JSON.stringify(existing.assigneeIds || []) !== JSON.stringify(next.assigneeIds)) changed.push(`исполнители: ${next.assigneeIds.map((id) => employee(id, state)?.name || id).join(', ') || 'Не назначены'}`);
     if (existing) Object.assign(existing, next); else state.tasks.unshift(next);
     if (!existing || changed.length) log(state, next.siteId || orderSiteId, existing ? `Изменено: ${changed.join(', ')}` : `Создано задание: ${next.title}`, next.id, 'system', payload.authorId || 'manager-1');
   } else if (action === 'construction.plan.initialize') {
@@ -265,13 +278,13 @@ export function validateState(state) {
   const has = (table, id) => state[table].some((r) => r.id === id);
   if (!Array.isArray(state.employees) || state.employees.length > 20000 || state.employees.some((p) => !p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name || typeof p.role !== 'string' || !p.role.trim() || p.role.length > 120 || typeof p.phone !== 'string' || typeof p.email !== 'string' || typeof p.department !== 'string' || typeof p.notes !== 'string' || typeof p.active !== 'boolean' || typeof p.avatar !== 'string' || !EMPLOYEE_AVATARS.includes(p.avatar) || !['hours','days'].includes(p.attendanceMode) || !Number.isFinite(p.payRate) || p.payRate < 0 || !Number.isFinite(p.advanceAmount) || p.advanceAmount < 0) || new Set(state.employees.map((p) => p.id)).size !== state.employees.length) throw new Error('Некорректный список сотрудников');
   if (!Array.isArray(state.crews) || state.crews.length > 20000 || state.crews.some((c) => !c || typeof c.id !== 'string' || !c.id || typeof c.name !== 'string' || !c.name || typeof c.specialty !== 'string' || typeof c.phone !== 'string' || typeof c.notes !== 'string' || typeof c.active !== 'boolean' || !Array.isArray(c.memberIds) || c.memberIds.some((id) => !has('employees', id)) || (c.leadId && (!has('employees', c.leadId) || !c.memberIds.includes(c.leadId))))) throw new Error('Некорректный список бригад');
-  if (state.sites.some((s) => !has('clients', s.clientId) || (s.buildingBrief !== undefined && (typeof s.buildingBrief !== 'object' || s.buildingBrief === null || Array.isArray(s.buildingBrief)))) || state.leads.some((l) => !has('sites', l.siteId) || (l.ownerId && !has('employees', l.ownerId)) || !LEAD_STAGES.some((v) => v.id === l.status)) || state.orders.some((o) => !has('sites', o.siteId) || (o.leadId && !has('leads', o.leadId)))) throw new Error('Нарушены связи клиентов, заявок и заказов');
+  if (state.sites.some((s) => !has('clients', s.clientId) || (s.buildingBrief !== undefined && (typeof s.buildingBrief !== 'object' || s.buildingBrief === null || Array.isArray(s.buildingBrief)))) || state.leads.some((l) => !has('sites', l.siteId) || (l.ownerId && !has('employees', l.ownerId)) || !LEAD_STAGES.some((v) => v.id === l.status) || !Array.isArray(l.checklist) || l.checklist.some((item) => typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.done !== 'boolean')) || state.orders.some((o) => !has('sites', o.siteId) || (o.leadId && !has('leads', o.leadId)))) throw new Error('Нарушены связи клиентов, заявок и заказов');
   if (!Array.isArray(state.constructionStages) || state.constructionStages.length > 50000 || state.constructionStages.some((stage) => !stage || typeof stage.id !== 'string' || !stage.id || !has('sites', stage.siteId) || typeof stage.title !== 'string' || !stage.title || typeof stage.group !== 'string' || !CONSTRUCTION_STATUSES.some((value) => value.id === stage.status) || !Number.isFinite(stage.progress) || stage.progress < 0 || stage.progress > 100 || !Array.isArray(stage.dependencyIds) || stage.dependencyIds.some((id) => !state.constructionStages.some((value) => value.id === id && value.siteId === stage.siteId)) || !Array.isArray(stage.comments) || !Array.isArray(stage.attachments))) throw new Error('Некорректный план строительства');
   for (const lead of state.leads) validDue(lead.dueAt);
   for (const task of state.tasks) {
     const taskOrderSite = state.orders.find((order) => order.id === task.orderId)?.siteId || '';
     const taskStage = state.constructionStages.find((stage) => stage.id === task.constructionStageId);
-    if ((task.orderId && !has('orders', task.orderId)) || (task.siteId && !has('sites', task.siteId)) || (task.orderId && task.siteId !== taskOrderSite) || (task.constructionStageId && (!taskStage || taskStage.siteId !== task.siteId)) || (task.crewId && !state.crews.some((crew) => crew.id === task.crewId)) || (task.assigneeId && !has('employees', task.assigneeId)) || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean') || typeof task.originalDueAt !== 'string' || !Array.isArray(task.rescheduleHistory) || task.rescheduleHistory.some((entry) => !entry || typeof entry.from !== 'string' || typeof entry.to !== 'string' || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at))) || typeof (task.question ?? '') !== 'string' || (task.question ?? '').length > 5000 || typeof (task.answer ?? '') !== 'string' || (task.answer ?? '').length > 5000) throw new Error('Некорректное производственное задание');
+    if ((task.orderId && !has('orders', task.orderId)) || (task.siteId && !has('sites', task.siteId)) || (task.orderId && task.siteId !== taskOrderSite) || (task.constructionStageId && (!taskStage || taskStage.siteId !== task.siteId)) || (task.crewId && !state.crews.some((crew) => crew.id === task.crewId)) || !Array.isArray(task.assigneeIds) || task.assigneeIds.some((id) => !has('employees', id)) || task.assigneeId !== (task.assigneeIds[0] || '') || !TASK_STAGES.some((v) => v.id === task.status) || !['normal', 'high'].includes(task.priority) || !Number.isFinite(task.quantity) || task.quantity <= 0 || !Number.isFinite(task.completedQty) || task.completedQty < 0 || task.completedQty > task.quantity || !Array.isArray(task.checklist) || task.checklist.some((v) => typeof v.id !== 'string' || typeof v.title !== 'string' || typeof v.done !== 'boolean') || typeof task.originalDueAt !== 'string' || !Array.isArray(task.rescheduleHistory) || task.rescheduleHistory.some((entry) => !entry || typeof entry.from !== 'string' || typeof entry.to !== 'string' || typeof entry.at !== 'string' || Number.isNaN(Date.parse(entry.at))) || typeof (task.question ?? '') !== 'string' || (task.question ?? '').length > 5000 || typeof (task.answer ?? '') !== 'string' || (task.answer ?? '').length > 5000) throw new Error('Некорректное производственное задание');
     validDue(task.dueAt);
     if (task.originalDueAt) validDue(task.originalDueAt);
     for (const entry of task.rescheduleHistory) { if (entry.from) validDue(entry.from); validDue(entry.to); }

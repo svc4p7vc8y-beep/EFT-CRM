@@ -1,24 +1,27 @@
 import { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
-import { Badge, Empty, Timeline, VoiceInput } from '../components/UI.jsx';
+import { Badge, Empty, VoiceInput } from '../components/UI.jsx';
 import { CallLink } from '../components/CallLink.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
 import { briefReadiness, CALCULATOR_URL, downloadCalculatorBrief } from '../app/buildingBrief.js';
 import '../components/building-brief.css';
+import './lead-discussion.css';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
 
-export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, onChat, notify }) {
+export function ClientWorkspace({ state, lead, currentEmployeeId = '', command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, onChat, notify }) {
   const { client, site } = leadContext(state, lead);
-  const [activityType, setActivityType] = useState('call');
+  const [activityType, setActivityType] = useState('note');
   const [activityText, setActivityText] = useState('');
+  const [checkText, setCheckText] = useState('');
+  const [recipientIds, setRecipientIds] = useState(lead.ownerId && lead.ownerId !== currentEmployeeId ? [lead.ownerId] : []);
   const [newAction, setNewAction] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
   const orders = useMemo(() => state.orders.filter((order) => order.siteId === site.id), [state.orders, site.id]);
   const orderIds = useMemo(() => new Set(orders.map((order) => order.id)), [orders]);
   const tasks = useMemo(() => state.tasks.filter((task) => orderIds.has(task.orderId)), [state.tasks, orderIds]);
-  const events = useMemo(() => state.activities.filter((event) => event.siteId === site.id).toSorted((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [state.activities, site.id]);
+  const events = useMemo(() => state.activities.filter((event) => event.siteId === site.id && !event.taskId).toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)), [state.activities, site.id]);
   const attachments = useMemo(() => state.attachments.filter((item) => item.siteId === site.id), [state.attachments, site.id]);
   const stageIndex = Math.max(0, LEAD_STAGES.findIndex((stage) => stage.id === lead.status));
   const progress = lead.status === 'lost' ? 0 : Math.round(((stageIndex + 1) / (LEAD_STAGES.length - 1)) * 100);
@@ -40,7 +43,18 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
 
   function addActivity(event) {
     event.preventDefault();
-    try { command('activity.create', { siteId: site.id, taskId: '', type: activityType, text: activityText }); setActivityText(''); notify('Запись добавлена в историю'); }
+    try { command('activity.create', { siteId: site.id, taskId: '', type: activityType, text: activityText, recipientIds: activityType === 'note' ? recipientIds : [], authorId: currentEmployeeId }); setActivityText(''); notify(recipientIds.length && activityType === 'note' ? 'Комментарий сохранён, сотрудникам отправлены уведомления' : 'Запись добавлена в историю'); }
+    catch (error) { notify(error.message, true); }
+  }
+
+  function updateCheck(event) {
+    event.preventDefault();
+    try { command('lead.check', { id: lead.id, title: checkText, authorId: currentEmployeeId }); setCheckText(''); notify('Пункт чек-листа добавлен'); }
+    catch (error) { notify(error.message, true); }
+  }
+
+  function toggleCheck(checkId) {
+    try { command('lead.check', { id: lead.id, checkId, authorId: currentEmployeeId }); }
     catch (error) { notify(error.message, true); }
   }
 
@@ -91,9 +105,11 @@ export function ClientWorkspace({ state, lead, command, onBack, onEditLead, onEd
           <details className="action-maker"><summary><Plus size={14} />Добавить свой вариант действия</summary><form onSubmit={addAction}><VoiceInput><input aria-label="Новый вариант действия" value={newAction} onChange={(event) => setNewAction(event.target.value)} maxLength={200} required placeholder="Например, запросить фото участка"/></VoiceInput><button className="button" type="submit">Добавить</button></form></details>
         </section>
 
-        <section className="client-panel"><div className="client-section-title"><div><MessageSquare size={19} /><h2>История общения</h2></div><span>{events.length} событий</span></div>
-          <form className="quick-communication" onSubmit={addActivity}><select aria-label="Канал общения" value={activityType} onChange={(event) => setActivityType(event.target.value)}><option value="call">Звонок</option><option value="message">Мессенджер</option><option value="email">Письмо</option><option value="meeting">Встреча</option><option value="note">Заметка</option></select><VoiceInput><textarea aria-label="Результат общения" value={activityText} onChange={(event) => setActivityText(event.target.value)} required rows={3} maxLength={5000} placeholder="Что обсудили, что решил клиент, что сделать дальше"/></VoiceInput><button className="button primary">Добавить в историю</button></form>
-          <Timeline state={state} events={events} />
+        <section className="client-panel lead-discussion"><div className="client-section-title"><div><MessageSquare size={19} /><h2>Заметки и история общения</h2></div><span>{events.length} сообщений</span></div>
+          {lead.notes ? <p className="lead-initial-note"><strong>Описание заявки</strong>{lead.notes}</p> : null}
+          <div className="lead-checklist"><div className="client-section-title"><div><CheckCircle2 size={18} /><h3>Чек-лист</h3></div><span>{lead.checklist?.filter((item) => item.done).length || 0} / {lead.checklist?.length || 0}</span></div>{lead.checklist?.map((item) => <label key={item.id} className="check-row"><input type="checkbox" checked={item.done} onChange={() => toggleCheck(item.id)} /><span>{item.title}</span></label>)}<form onSubmit={updateCheck} className="inline-form"><VoiceInput><input aria-label="Новый пункт чек-листа заявки" value={checkText} onChange={(event) => setCheckText(event.target.value)} required maxLength={500} placeholder="Добавить пункт выполнения…" /></VoiceInput><button className="button"><Plus size={15} />Добавить</button></form></div>
+          <ol className="lead-chat-list">{events.length ? events.map((event) => <li key={event.id} className={event.type === 'system' ? 'system' : event.authorId === currentEmployeeId ? 'own' : ''}><div className="lead-chat-bubble"><header><strong>{event.authorName || employee(event.authorId, state)?.name || (event.direction === 'incoming' ? 'Клиент' : 'Система')}</strong><span>{event.subject === 'checklist.done' ? '✓ Выполнен пункт' : event.type === 'note' ? 'Комментарий' : event.type === 'call' ? 'Звонок' : event.type === 'meeting' ? 'Встреча' : event.type === 'email' ? 'Письмо' : event.type === 'system' ? 'Событие' : 'Сообщение'}</span></header><p>{event.text}</p><time>{dateLabel(event.createdAt)}</time></div></li>) : <li className="lead-chat-empty">Обсуждение заявки пока пустое.</li>}</ol>
+          <form className="quick-communication lead-chat-compose" onSubmit={addActivity}><select aria-label="Тип записи" value={activityType} onChange={(event) => setActivityType(event.target.value)}><option value="note">Комментарий сотрудникам</option><option value="call">Звонок</option><option value="message">Мессенджер</option><option value="email">Письмо</option><option value="meeting">Встреча</option></select>{activityType === 'note' ? <details className="lead-recipients"><summary>Уведомить сотрудников: {recipientIds.length || 'никого'}</summary><div>{state.employees.filter((person) => person.active && person.id !== currentEmployeeId).map((person) => <label key={person.id}><input type="checkbox" checked={recipientIds.includes(person.id)} onChange={(event) => setRecipientIds((ids) => event.target.checked ? [...ids, person.id] : ids.filter((id) => id !== person.id))} />{person.name}</label>)}</div></details> : null}<VoiceInput><textarea aria-label="Сообщение по заявке" value={activityText} onChange={(event) => setActivityText(event.target.value)} required rows={3} maxLength={5000} placeholder="Напишите комментарий или итог общения…"/></VoiceInput><button className="button primary">Отправить</button></form>
         </section>
 
         <section className="client-panel"><div className="client-section-title"><div><Paperclip size={19} /><h2>Файлы, фотографии и переписки</h2></div><button className="button" disabled={uploading} onClick={() => fileRef.current?.click()}><Upload size={15}/>{uploading ? 'Загрузка…' : 'Прикрепить'}</button></div>

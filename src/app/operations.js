@@ -1,6 +1,7 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 74;
+export const RELEASE = 75;
+export const taskAssigneeIds = (task) => Array.isArray(task?.assigneeIds) ? task.assigneeIds : task?.assigneeId ? [task.assigneeId] : [];
 export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;
 export function exportCalculatorPrices(state) {
@@ -30,11 +31,12 @@ export function extendWorkspace(state) {
     site.actualStart ??= ''; site.actualFinish ??= ''; site.notes ??= '';
   });
   state.employees?.forEach((person, index) => { person.avatar ??= `./avatars/employee-${String(index % 15 + 1).padStart(2, '0')}.jpg`; person.attendanceMode ??= 'hours'; person.payRate ??= 0; person.advanceAmount ??= 0; });
-  state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; task.siteId ||= state.orders?.find((order) => order.id === task.orderId)?.siteId || ''; task.crewId ??= ''; task.constructionStageId ??= ''; });
+  state.tasks?.forEach((task) => { task.rescheduleHistory ??= []; task.originalDueAt ??= ''; task.siteId ||= state.orders?.find((order) => order.id === task.orderId)?.siteId || ''; task.crewId ??= ''; task.constructionStageId ??= ''; task.assigneeIds = [...new Set(taskAssigneeIds(task).filter(Boolean))]; task.assigneeId = task.assigneeIds[0] || ''; });
+  state.leads?.forEach((lead) => { lead.checklist ??= []; });
   state.activities?.forEach((item) => {
     item.channel ??= item.type === 'email' ? 'email' : item.type === 'call' ? 'call' : item.type === 'message' ? 'telegram' : item.type === 'system' ? 'system' : 'note';
     item.direction ??= ['system', 'note', 'call'].includes(item.channel) ? 'internal' : 'outgoing';
-    item.subject ??= ''; item.externalKey ??= ''; item.read ??= true; item.attachments ??= [];
+    item.subject ??= ''; item.externalKey ??= ''; item.read ??= true; item.attachments ??= []; item.recipientIds ??= [];
   });
   state.constructionStages?.forEach((stage) => { stage.dependencyIds ??= []; stage.comments ??= []; stage.attachments ??= []; stage.notes ??= ''; stage.blockReason ??= ''; stage.actualStart ??= ''; stage.actualFinish ??= ''; stage.assigneeId ??= ''; stage.crewId ??= ''; });
   return state;

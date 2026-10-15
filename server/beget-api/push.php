@@ -55,10 +55,9 @@ function crm_push_emit(int $userId, string $kind, string $title, string $body, s
 
 function crm_push_emit_for_employee(string $employeeId, string $kind, string $title, string $body, string $targetPath, string $eventKey): void {
     if ($employeeId === '') return;
-    $statement = crm_db()->prepare('SELECT id FROM crm_users WHERE employee_id=? AND active=1 LIMIT 1');
+    $statement = crm_db()->prepare('SELECT id FROM crm_users WHERE employee_id=? AND active=1');
     $statement->execute([$employeeId]);
-    $userId = $statement->fetchColumn();
-    if ($userId !== false) crm_push_emit((int)$userId, $kind, $title, $body, $targetPath, $eventKey);
+    foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId, $kind, $title, $body, $targetPath, $eventKey);
 }
 
 function crm_push_notify_site(string $siteId, string $eventId): void {

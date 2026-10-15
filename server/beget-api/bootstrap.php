@@ -204,6 +204,7 @@ function crm_schema_ensure_v30(): void {
             'owner_employee_id' => "CHAR(36) NULL AFTER owner_id",
             'source' => "VARCHAR(120) NOT NULL DEFAULT '' AFTER next_action_at",
             'notes' => "TEXT NULL AFTER source",
+            'checklist_json' => "JSON NULL AFTER notes",
         ],
         'crm_tasks' => [
             'order_id' => "CHAR(36) NULL AFTER id",
@@ -213,6 +214,7 @@ function crm_schema_ensure_v30(): void {
             'unit_name' => "VARCHAR(80) NOT NULL DEFAULT 'задача' AFTER completed_quantity",
             'block_reason' => "TEXT NULL AFTER unit_name",
             'checklist_json' => "JSON NULL AFTER block_reason",
+            'assignee_ids_json' => "JSON NULL AFTER assignee_id",
             'original_due_at' => "DATETIME NULL AFTER checklist_json",
             'reschedule_history_json' => "JSON NULL AFTER original_due_at",
         ],
@@ -223,6 +225,7 @@ function crm_schema_ensure_v30(): void {
             'is_read' => "TINYINT(1) NOT NULL DEFAULT 1 AFTER body",
             'is_ignored' => "TINYINT(1) NOT NULL DEFAULT 0 AFTER is_read",
             'attachments_json' => "JSON NULL AFTER is_read",
+            'recipient_ids_json' => "JSON NULL AFTER attachments_json",
             'delivery_status' => "ENUM('internal','saved','queued','sent','delivered','error') NOT NULL DEFAULT 'saved' AFTER attachments_json",
             'delivery_error' => "VARCHAR(1000) NOT NULL DEFAULT '' AFTER delivery_status",
         ],
@@ -283,8 +286,8 @@ function crm_public_workspace(): array {
     $leads = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'siteId' => $row['site_id'], 'status' => $row['status'] === 'in_progress' ? 'working' : $row['status'],
         'ownerId' => $row['owner_employee_id'] ?: '', 'nextAction' => $row['next_action'], 'dueAt' => crm_db_datetime($row['next_action_at']),
-        'source' => $row['source'] ?: 'Вручную', 'notes' => $row['notes'] ?: '', 'createdAt' => crm_db_datetime($row['created_at'], true),
-    ], $db->query('SELECT id, site_id, status, owner_employee_id, next_action, next_action_at, source, notes, created_at FROM crm_leads ORDER BY created_at DESC')->fetchAll());
+        'source' => $row['source'] ?: 'Вручную', 'notes' => $row['notes'] ?: '', 'checklist' => json_decode((string)($row['checklist_json'] ?? '[]'), true) ?: [], 'createdAt' => crm_db_datetime($row['created_at'], true),
+    ], $db->query('SELECT id, site_id, status, owner_employee_id, next_action, next_action_at, source, notes, checklist_json, created_at FROM crm_leads ORDER BY created_at DESC')->fetchAll());
     $orders = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'number' => $row['public_number'], 'siteId' => $row['site_id'], 'leadId' => $row['lead_id'] ?: '',
         'scope' => $row['scope'], 'reference' => $row['reference_text'], 'approvedBy' => $row['approved_by_employee_id'] ?: '',
@@ -294,11 +297,12 @@ function crm_public_workspace(): array {
     foreach ($db->query('SELECT q.task_id, q.question, q.answer, q.requester_user_id, q.answered_by_user_id, q.asked_at, q.answered_at, requester.display_name AS requester_name, answerer.display_name AS answerer_name FROM crm_task_questions q JOIN crm_users requester ON requester.id=q.requester_user_id LEFT JOIN crm_users answerer ON answerer.id=q.answered_by_user_id')->fetchAll() as $question) $questions[$question['task_id']] = $question;
     $tasks = array_map(static function (array $row) use ($questions): array {
         $checklist = json_decode((string)($row['checklist_json'] ?? '[]'), true);
+        $assigneeIds = json_decode((string)($row['assignee_ids_json'] ?? '[]'), true);
         $history = json_decode((string)($row['reschedule_history_json'] ?? '[]'), true);
         $question = $questions[$row['id']] ?? null;
         return [
             'id' => $row['id'], 'orderId' => $row['order_id'] ?: '', 'siteId' => $row['site_id'] ?: '', 'constructionStageId' => $row['construction_stage_id'] ?: '', 'crewId' => $row['crew_id'] ?: '', 'title' => $row['title'], 'description' => $row['description'], 'createdByName' => $row['creator_name'] ?: '',
-            'assigneeId' => $row['assignee_id'] ?: '', 'status' => $row['status'], 'priority' => $row['priority'], 'dueAt' => crm_db_datetime($row['due_at']),
+            'assigneeId' => $row['assignee_id'] ?: '', 'assigneeIds' => is_array($assigneeIds) && $assigneeIds ? $assigneeIds : ($row['assignee_id'] ? [$row['assignee_id']] : []), 'status' => $row['status'], 'priority' => $row['priority'], 'dueAt' => crm_db_datetime($row['due_at']),
             'quantity' => (float)$row['quantity'], 'completedQty' => (float)$row['completed_quantity'], 'unit' => $row['unit_name'],
             'blockReason' => $row['block_reason'] ?: '', 'checklist' => is_array($checklist) ? $checklist : [],
             'createdAt' => crm_db_datetime($row['created_at'], true), 'originalDueAt' => crm_db_datetime($row['original_due_at']),
@@ -322,7 +326,7 @@ function crm_public_workspace(): array {
           'channel' => $row['channel'], 'direction' => $row['direction'], 'subject' => $row['subject'] ?: '',
           'externalKey' => $row['external_key'] === $row['id'] ? '' : ($row['external_key'] ?: ''), 'text' => $row['body'],
           'authorId' => $row['author_employee_id'] ?: '', 'authorName' => $row['author_name'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
-          'read' => (bool)$row['is_read'], 'ignored' => (bool)($row['is_ignored'] ?? false), 'attachments' => is_array($attachments) ? $attachments : [],
+          'read' => (bool)$row['is_read'], 'ignored' => (bool)($row['is_ignored'] ?? false), 'attachments' => is_array($attachments) ? $attachments : [], 'recipientIds' => json_decode((string)($row['recipient_ids_json'] ?? '[]'), true) ?: [],
           'workflowStatus' => (string)($workflow['status'] ?? ''), 'followUpAt' => (string)($workflow['followUpAt'] ?? ''),
           'deliveryStatus' => $row['delivery_status'] ?? ($row['direction'] === 'internal' ? 'internal' : 'saved'), 'deliveryError' => $row['delivery_error'] ?? ''];
     }, $db->query('SELECT c.*, u.display_name AS author_name FROM crm_communications c LEFT JOIN crm_users u ON u.id=c.author_id ORDER BY c.occurred_at DESC')->fetchAll());
@@ -469,7 +473,7 @@ function crm_workspace_for_user(array $user): array {
     $tasks = $workspace['tasks'];
     if (!crm_can($user, 'tasks.manage') && !crm_can($user, 'tasks.view')) {
         $employeeId = (string)($user['employeeId'] ?? '');
-        $tasks = array_values(array_filter($tasks, static fn(array $task): bool => $employeeId !== '' && $task['assigneeId'] === $employeeId));
+        $tasks = array_values(array_filter($tasks, static fn(array $task): bool => $employeeId !== '' && in_array($employeeId, $task['assigneeIds'], true)));
     }
     $taskIds = array_fill_keys(array_column($tasks, 'id'), true);
     $orderIds = array_fill_keys(array_filter(array_column($tasks, 'orderId')), true);
@@ -538,8 +542,9 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         }
         $employeeIds = array_fill_keys($db->query('SELECT id FROM crm_employees')->fetchAll(PDO::FETCH_COLUMN), true);
         $previousTasks = []; $previousTaskCreators = [];
-        foreach ($db->query('SELECT id, assignee_id, created_by FROM crm_tasks')->fetchAll() as $previousTask) {
-            $previousTasks[$previousTask['id']] = (string)($previousTask['assignee_id'] ?? '');
+        foreach ($db->query('SELECT id, assignee_id, assignee_ids_json, created_by FROM crm_tasks')->fetchAll() as $previousTask) {
+            $previousIds = json_decode((string)($previousTask['assignee_ids_json'] ?? '[]'), true);
+            $previousTasks[$previousTask['id']] = is_array($previousIds) && $previousIds ? $previousIds : ($previousTask['assignee_id'] ? [$previousTask['assignee_id']] : []);
             $previousTaskCreators[$previousTask['id']] = (int)($previousTask['created_by'] ?? 0);
         }
         $previousQuestions = []; $previousAnswers = [];
@@ -586,14 +591,18 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
               isset($employeeIds[$assignee]) ? $assignee : null, isset($crewIds[$crew]) ? $crew : null, json_encode(is_array($row['dependencyIds'] ?? null) ? $row['dependencyIds'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_text($row['notes'] ?? '', 10000), crm_text($row['blockReason'] ?? '', 10000),
               json_encode(is_array($row['comments'] ?? null) ? $row['comments'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), json_encode(is_array($row['attachments'] ?? null) ? $row['attachments'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), crm_sql_datetime($row['updatedAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
-        $insertLead = $db->prepare('INSERT INTO crm_leads (id, site_id, public_number, status, owner_id, owner_employee_id, next_action, next_action_at, source, notes, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)');
+        $insertLead = $db->prepare('INSERT INTO crm_leads (id, site_id, public_number, status, owner_id, owner_employee_id, next_action, next_action_at, source, notes, checklist_json, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($leads as $index => $row) {
             $status = (string)($row['status'] ?? 'new'); if ($status === 'working') $status = 'in_progress';
             if (!in_array($status, ['new','in_progress','calculation','offer','approval','contract','won','lost'], true)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Некорректный этап заявки.'], 422);
             $owner = crm_text($row['ownerId'] ?? '', 36); if (!isset($employeeIds[$owner])) $owner = '';
             $id = crm_required_text($row['id'] ?? '', 'идентификатор заявки', 36);
-            $insertLead->execute([$id, crm_required_text($row['siteId'] ?? '', 'объект заявки', 36), 'L-' . substr(hash('sha256', $id), 0, 16), $status, $owner ?: null, crm_text($row['nextAction'] ?? '', 250), crm_sql_datetime($row['dueAt'] ?? ''), crm_text($row['source'] ?? '', 120), crm_text($row['notes'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+            $leadChecklist = is_array($row['checklist'] ?? null) ? $row['checklist'] : [];
+            if (count($leadChecklist) > 200 || array_filter($leadChecklist, static fn($item) => !is_array($item) || empty($item['id']) || !isset($item['title']) || !is_string($item['title']) || !is_bool($item['done'] ?? null))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте чек-лист заявки.'], 422);
+            $insertLead->execute([$id, crm_required_text($row['siteId'] ?? '', 'объект заявки', 36), 'L-' . substr(hash('sha256', $id), 0, 16), $status, $owner ?: null, crm_text($row['nextAction'] ?? '', 250), crm_sql_datetime($row['dueAt'] ?? ''), crm_text($row['source'] ?? '', 120), crm_text($row['notes'] ?? '', 10000), json_encode($leadChecklist, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
+        $leadBySite = [];
+        foreach ($leads as $leadRow) $leadBySite[(string)$leadRow['siteId']] = (string)$leadRow['id'];
         $insertOrder = $db->prepare('INSERT INTO crm_orders (id, public_number, site_id, lead_id, scope, reference_text, approved_by_employee_id, approved_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($orders as $row) {
             $approvedBy = crm_text($row['approvedBy'] ?? '', 36); if (!isset($employeeIds[$approvedBy])) $approvedBy = '';
@@ -609,11 +618,14 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $insertRoute->execute([crm_required_text($row['id'] ?? '', 'идентификатор рейса', 36), crm_required_text($row['number'] ?? '', 'номер рейса', 32), $siteId, $orderId ?: null, crm_sql_datetime($row['plannedAt'] ?? ''), crm_text($row['deliveryWindow'] ?? '', 120), crm_required_text($row['vehicle'] ?? '', 'машина', 200), $driverId ?: null, $status, crm_text($row['carrier'] ?? '', 200), crm_text($row['loadingAddress'] ?? '', 500), crm_text($row['unloadingAddress'] ?? '', 500), crm_text($row['note'] ?? '', 10000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), crm_sql_datetime($row['updatedAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
         $stageSites = $db->query('SELECT id, site_id FROM crm_construction_stages')->fetchAll(PDO::FETCH_KEY_PAIR);
-        $insertTask = $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insertTask = $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, assignee_ids_json, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $saveQuestion = $db->prepare("INSERT INTO crm_task_questions (task_id, question, requester_user_id, answer) VALUES (?, ?, ?, '') ON DUPLICATE KEY UPDATE question=VALUES(question), requester_user_id=VALUES(requester_user_id), answer='', answered_by_user_id=NULL, answered_at=NULL, asked_at=NOW()");
         $deleteQuestion = $db->prepare('DELETE FROM crm_task_questions WHERE task_id=?');
         foreach ($tasks as $row) {
-            $orderId = crm_text($row['orderId'] ?? '', 36); $assignee = crm_text($row['assigneeId'] ?? '', 36); if (!isset($employeeIds[$assignee])) $assignee = '';
+            $orderId = crm_text($row['orderId'] ?? '', 36);
+            $assigneeIds = array_values(array_unique(array_filter(array_map(static fn($id) => crm_text($id, 36), is_array($row['assigneeIds'] ?? null) ? $row['assigneeIds'] : [$row['assigneeId'] ?? '']))));
+            if (count($assigneeIds) > 50 || array_filter($assigneeIds, static fn($id) => !isset($employeeIds[$id]))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Исполнитель не найден.'], 422);
+            $assignee = $assigneeIds[0] ?? '';
             $siteId = crm_text($row['siteId'] ?? '', 36) ?: ($orderSites[$orderId] ?? ''); if (!isset($siteIds[$siteId])) $siteId = '';
             $crewId = crm_text($row['crewId'] ?? '', 36); if (!isset($crewIds[$crewId])) $crewId = '';
             $stageId = crm_text($row['constructionStageId'] ?? '', 36); if (!isset($stageSites[$stageId]) || $stageSites[$stageId] !== $siteId) $stageId = '';
@@ -625,18 +637,18 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             if ($question !== '' && $status === 'done' && ($question !== ($previousQuestions[$taskId] ?? '') || ($previousAnswers[$taskId] ?? '') === '')) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Сначала дождитесь ответа на вопрос.'], 422);
             $quantity = (float)($row['quantity'] ?? 1); $completed = (float)($row['completedQty'] ?? 0);
             if ($quantity <= 0 || $completed < 0 || $completed > $quantity) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте объём задания.'], 422);
-            $insertTask->execute([$taskId, $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ($previousTaskCreators[$taskId] ?? 0) ?: (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
+            $insertTask->execute([$taskId, $orderId ?: null, crm_required_text($row['title'] ?? '', 'название задачи', 250), crm_text($row['description'] ?? '', 20000), $siteId ?: null, $assignee ?: null, json_encode($assigneeIds, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $crewId ?: null, $stageId ?: null, $status, $priority, crm_sql_datetime($row['dueAt'] ?? ''), $quantity, $completed, crm_required_text($row['unit'] ?? 'задача', 'единица', 80), crm_text($row['blockReason'] ?? '', 10000), json_encode(is_array($row['checklist'] ?? null) ? $row['checklist'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['originalDueAt'] ?? ''), json_encode(is_array($row['rescheduleHistory'] ?? null) ? $row['rescheduleHistory'] : [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ($previousTaskCreators[$taskId] ?? 0) ?: (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
             $questionChanged = $question !== ($previousQuestions[$taskId] ?? '');
             if ($questionChanged) {
                 if ($question === '') $deleteQuestion->execute([$taskId]);
                 else $saveQuestion->execute([$taskId, $question, (int)$user['id']]);
             }
-            if (!$initialize && $assignee !== '' && (!isset($previousTasks[$taskId]) || $previousTasks[$taskId] !== $assignee || $questionChanged && $question !== '')) {
-                crm_push_emit_for_employee($assignee, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : crm_text($row['title'] ?? '', 250), '#task/' . $taskId, 'task:' . ($revision + 1) . ':' . $taskId);
+            if (!$initialize) foreach ($assigneeIds as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '') && (!in_array($recipientId, $previousTasks[$taskId] ?? [], true) || $questionChanged && $question !== '')) {
+                crm_push_emit_for_employee($recipientId, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : crm_text($row['title'] ?? '', 250), '#task/' . $taskId, 'task:' . ($revision + 1) . ':' . $taskId . ':' . $recipientId);
             }
         }
         $db->exec('DELETE q FROM crm_task_questions q LEFT JOIN crm_tasks t ON t.id=q.task_id WHERE t.id IS NULL');
-        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, is_ignored, attachments_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, is_ignored, attachments_json, recipient_ids_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {
             $type = in_array($row['type'] ?? '', ['note','call','meeting','email','message','system'], true) ? $row['type'] : 'note';
             $channel = in_array($row['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','system'], true) ? $row['channel'] : (in_array($type, ['note','call','email','system'], true) ? $type : 'note');
@@ -645,8 +657,14 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $activityId = crm_required_text($row['id'] ?? '', 'идентификатор записи', 36);
             $externalKey = crm_text($row['externalKey'] ?? '', 255) ?: $activityId;
             $attachments = is_array($row['attachments'] ?? null) ? $row['attachments'] : [];
+            $recipients = array_values(array_unique(array_filter(array_map(static fn($id) => crm_text($id, 36), is_array($row['recipientIds'] ?? null) ? $row['recipientIds'] : []))));
+            if (count($recipients) > 50 || array_filter($recipients, static fn($id) => !isset($employeeIds[$id]))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Получатель сообщения не найден.'], 422);
             $delivery = in_array($row['deliveryStatus'] ?? '', ['internal','saved','queued','sent','delivered','error'], true) ? $row['deliveryStatus'] : ($direction === 'internal' ? 'internal' : 'saved');
-            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, !empty($row['ignored']) ? 1 : 0, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), ($previousActivityAuthors[$activityId] ?? 0) ?: (int)$user['id'], $author ?: null]);
+            $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, !empty($row['ignored']) ? 1 : 0, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), json_encode($recipients, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), ($previousActivityAuthors[$activityId] ?? 0) ?: (int)$user['id'], $author ?: null]);
+            if (!isset($previousActivityAuthors[$activityId]) && !$initialize && $type !== 'system' && $direction === 'internal') foreach ($recipients as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '')) {
+                $target = !empty($row['taskId']) ? '#task/' . $row['taskId'] : '#client/' . rawurlencode((string)($leadBySite[$row['siteId'] ?? ''] ?? ''));
+                if ($target !== '#client/') crm_push_emit_for_employee($recipientId, 'message', 'Новое сообщение по заявке', crm_text($row['text'] ?? '', 300), $target, 'activity:' . $activityId . ':' . $recipientId);
+            }
         }
         $nextRevision = $revision + 1;
         $db->prepare("UPDATE crm_settings SET setting_value = ? WHERE setting_key = 'workspace_revision'")->execute([(string)$nextRevision]);

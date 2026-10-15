@@ -4,6 +4,7 @@ import { Avatar, Badge, Empty, VoiceInput } from '../components/UI.jsx';
 import { TASK_STAGES, dateKey, dateLabel, employee, taskContext } from '../app/model.js';
 import './my-tasks.css';
 import './task-questions.css';
+import './task-assignees.css';
 
 const dayOf = (value) => value?.slice(0, 10) || '';
 const atNoon = (value) => new Date(`${value}T12:00:00`);
@@ -14,13 +15,11 @@ const monthTitle = (value) => atNoon(value).toLocaleDateString('ru-RU', { month:
 const dayTitle = (value) => atNoon(value).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'short' });
 
 function AssigneePicker({ state, task, onAssign, side = false }) {
-  return <label className={`task-person task-assignee-picker${side ? ' side' : ''}`} onClick={(event) => event.stopPropagation()}>
-    <Avatar id={task.assigneeId} state={state} />
-    <select aria-label={`Ответственный: ${task.title}`} value={task.assigneeId || ''} onChange={(event) => onAssign(task.id, event.target.value)}>
-      <option value="">Не назначен</option>
-      {state.employees.filter((person) => person.active || person.id === task.assigneeId).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
-    </select>
-  </label>;
+  const ids = task.assigneeIds || (task.assigneeId ? [task.assigneeId] : []);
+  return <details className={`task-person task-assignee-picker${side ? ' side' : ''}`} onClick={(event) => event.stopPropagation()}>
+    <summary><Avatar id={ids[0]} state={state} />{ids.length ? ids.map((id) => employee(id, state)?.name).filter(Boolean).join(', ') : 'Не назначены'}</summary>
+    <div className="task-assignee-menu">{state.employees.filter((person) => person.active || ids.includes(person.id)).map((person) => <label key={person.id}><input type="checkbox" checked={ids.includes(person.id)} onChange={(event) => onAssign(task.id, event.target.checked ? [...ids, person.id] : ids.filter((id) => id !== person.id))} />{person.name}</label>)}</div>
+  </details>;
 }
 
 function TaskRow({ state, task, carried = false, selected, onSelect, onOpen, onMove, onReschedule, onAssign }) {
@@ -63,8 +62,8 @@ export function MyTasks({ state, search, command, createTask, ownTaskOnly = fals
   const tasks = useMemo(() => {
     const query = search.toLocaleLowerCase('ru-RU');
     return state.tasks.filter((task) => {
-      const ownerKey = task.assigneeId || '__unassigned__';
-      return (!questionsOnly || Boolean(task.question && !task.answer)) && (!staffIds.length || staffIds.includes(ownerKey)) && `${task.title} ${task.description} ${employee(task.assigneeId, state)?.name || 'не назначен'}`.toLocaleLowerCase('ru-RU').includes(query);
+      const ownerIds = task.assigneeIds || (task.assigneeId ? [task.assigneeId] : []);
+      return (!questionsOnly || Boolean(task.question && !task.answer)) && (!staffIds.length || (ownerIds.length ? ownerIds.some((id) => staffIds.includes(id)) : staffIds.includes('__unassigned__'))) && `${task.title} ${task.description} ${ownerIds.map((id) => employee(id, state)?.name).join(' ') || 'не назначен'}`.toLocaleLowerCase('ru-RU').includes(query);
     });
   }, [state, staffIds, search, questionsOnly]);
   const selectedTask = state.tasks.find((task) => task.id === selectedId) || tasks.find((task) => period === 'all' || dayOf(task.dueAt) === selectedDate) || tasks[0];
@@ -78,7 +77,7 @@ export function MyTasks({ state, search, command, createTask, ownTaskOnly = fals
   const needsPlanning = openTasks.filter((task) => !task.assigneeId || !task.dueAt);
   const plannedOpen = openTasks.filter((task) => task.assigneeId && task.dueAt).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
   function reschedule(id, dueAt) { try { command('task.reschedule', { id, dueAt }); setNotice('Новый срок сохранён в истории задачи.'); } catch (error) { setNotice(error.message); } }
-  function assign(id, assigneeId) { try { command('task.update', { id, assigneeId }); setNotice(assigneeId ? 'Ответственный назначен.' : 'Задача возвращена в общий список без исполнителя.'); } catch (error) { setNotice(error.message); } }
+  function assign(id, assigneeIds) { try { command('task.update', { id, assigneeIds }); setNotice(assigneeIds.length ? 'Исполнители назначены.' : 'Задача возвращена в общий список без исполнителя.'); } catch (error) { setNotice(error.message); } }
   async function submit(event) {
     event.preventDefault(); if (creating) return;
     try {
@@ -92,7 +91,7 @@ export function MyTasks({ state, search, command, createTask, ownTaskOnly = fals
     finally { setCreating(false); }
   }
   function navigate(amount) { if (period === 'month') { const date = atNoon(selectedDate); date.setMonth(date.getMonth() + amount); setSelectedDate(dateKey(date)); } else setSelectedDate(shiftDay(selectedDate, amount * (period === 'week' ? 7 : 1))); }
-  const listGroups = staff.map((person) => ({ person, tasks: today.filter((task) => task.assigneeId === person.id) })).filter((group) => group.tasks.length);
+  const listGroups = staff.map((person) => ({ person, tasks: today.filter((task) => task.assigneeIds?.includes(person.id)) })).filter((group) => group.tasks.length);
   const unassignedToday = today.filter((task) => !task.assigneeId);
   const boardTasks = period === 'all' ? openTasks : period === 'day' ? [...carried, ...today.filter((task) => !carried.includes(task)), ...unscheduled.filter((task) => !today.includes(task))] : tasks;
   const titleForPeriod = period === 'all' ? 'Все открытые задачи' : period === 'month' ? monthTitle(selectedDate) : period === 'week' ? `${dayTitle(mondayOf(selectedDate))} — ${dayTitle(shiftDay(mondayOf(selectedDate), 6))}` : dayTitle(selectedDate);

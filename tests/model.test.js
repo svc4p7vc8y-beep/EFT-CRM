@@ -53,6 +53,25 @@ test('общая задача может быть без исполнителя 
   state=applyCommand(state,'task.update',{id:state.tasks[0].id,assigneeId:'manager-1'});
   assert.equal(state.tasks[0].assigneeId,'manager-1');
 });
+test('несколько исполнителей сохраняются при изменении задачи', () => {
+  let state = createDemoState();
+  state = applyCommand(state, 'task.update', { id: 'task-1', assigneeIds: ['worker-1', 'worker-2'] });
+  assert.deepEqual(state.tasks.find((task) => task.id === 'task-1').assigneeIds, ['worker-1', 'worker-2']);
+  state = applyCommand(state, 'task.update', { id: 'task-1', description: 'Проверить раскрой' });
+  assert.deepEqual(state.tasks.find((task) => task.id === 'task-1').assigneeIds, ['worker-1', 'worker-2']);
+  assert.throws(() => applyCommand(state, 'task.update', { id: 'task-1', assigneeIds: ['missing'] }), /Исполнитель не найден/);
+});
+test('чек-лист заявки отражается в истории, комментарий хранит адресатов', () => {
+  let state = createDemoState();
+  state = applyCommand(state, 'lead.check', { id: 'lead-1', title: 'Согласовать планировку', authorId: 'manager-1' });
+  const checkId = state.leads.find((lead) => lead.id === 'lead-1').checklist[0].id;
+  state = applyCommand(state, 'lead.check', { id: 'lead-1', checkId, authorId: 'manager-2' });
+  state = applyCommand(state, 'activity.create', { siteId: 'site-1', type: 'note', text: 'Планировка согласована', authorId: 'manager-1', recipientIds: ['manager-2', 'estimator-1'] });
+  assert.equal(state.leads.find((lead) => lead.id === 'lead-1').checklist[0].done, true);
+  assert.ok(state.activities.some((item) => item.siteId === 'site-1' && item.subject === 'checklist.done'));
+  assert.deepEqual(state.activities[0].recipientIds, ['manager-2', 'estimator-1']);
+  assert.doesNotThrow(() => validateState(state));
+});
 test('вопрос требует исполнителя, ответ сохраняется и не завершает задачу', () => {
   let state = createDemoState();
   assert.throws(() => applyCommand(state, 'task.create', { title: 'Уточнить поставку', question: 'Когда будет крепёж?', assigneeId: '', unit: 'задача', quantity: 1, completedQty: 0, status: 'planned', priority: 'normal' }), /выберите исполнителя/);

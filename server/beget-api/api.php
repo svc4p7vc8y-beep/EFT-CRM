@@ -15,6 +15,11 @@ $action = (string)($_GET['action'] ?? 'health');
 
 if (str_starts_with($action, 'chat.')) crm_chat_handle($action, $method);
 
+function crm_task_assignee_ids(array $task): array {
+    $ids = json_decode((string)($task['assignee_ids_json'] ?? '[]'), true);
+    return is_array($ids) && $ids ? array_values(array_unique(array_filter($ids, 'is_string'))) : (empty($task['assignee_id']) ? [] : [(string)$task['assignee_id']]);
+}
+
 if ($action === 'health' && $method === 'GET') {
     crm_db()->query('SELECT 1');
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
@@ -251,12 +256,14 @@ if ($action === 'tasks.create' && $method === 'POST') {
     $title = crm_required_text($task['title'] ?? '', 'название задачи', 250);
     $description = crm_text($task['description'] ?? '', 20000);
     $question = crm_text($task['question'] ?? '', 5000);
-    $assignee = crm_text($task['assigneeId'] ?? '', 36);
+    $assigneeIds = array_values(array_unique(array_filter(array_map(static fn($id) => crm_text($id, 36), is_array($task['assigneeIds'] ?? null) ? $task['assigneeIds'] : [$task['assigneeId'] ?? '']))));
     if (!$managesTasks) {
         if (empty($user['employeeId'])) crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Привяжите аккаунт к сотруднику в настройках.'], 403);
-        $assignee = (string)$user['employeeId'];
+        $assigneeIds = [(string)$user['employeeId']];
     }
-    if ($question !== '' && $assignee === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Для вопроса выберите исполнителя.'], 422);
+    if (count($assigneeIds) > 50) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Слишком много исполнителей.'], 422);
+    $assignee = $assigneeIds[0] ?? '';
+    if ($question !== '' && !$assigneeIds) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Для вопроса выберите исполнителя.'], 422);
     $status = in_array($task['status'] ?? 'planned', ['planned','doing','review','blocked','done'], true) ? $task['status'] : 'planned';
     $blockReason = crm_text($task['blockReason'] ?? '', 10000);
     if ($status === 'blocked' && $blockReason === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Укажите причину блокировки.'], 422);
@@ -268,16 +275,17 @@ if ($action === 'tasks.create' && $method === 'POST') {
     $crewId = crm_text($task['crewId'] ?? '', 36); $stageId = crm_text($task['constructionStageId'] ?? '', 36);
     $db = crm_db(); $db->beginTransaction();
     try {
-        if ($assignee !== '') { $q = $db->prepare('SELECT id FROM crm_employees WHERE id=? AND active=1'); $q->execute([$assignee]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Исполнитель не найден.'], 422); }
+        $checkAssignee = $db->prepare('SELECT id FROM crm_employees WHERE id=? AND active=1');
+        foreach ($assigneeIds as $personId) { $checkAssignee->execute([$personId]); if (!$checkAssignee->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Исполнитель не найден.'], 422); }
         if ($orderId !== '') { $q = $db->prepare('SELECT site_id FROM crm_orders WHERE id=?'); $q->execute([$orderId]); $orderSite = $q->fetchColumn(); if (!$orderSite || ($siteId !== '' && $siteId !== $orderSite)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Заказ и объект не совпадают.'], 422); $siteId = (string)$orderSite; }
         if ($siteId !== '') { $q = $db->prepare('SELECT id FROM crm_sites WHERE id=?'); $q->execute([$siteId]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Объект не найден.'], 422); }
         if ($crewId !== '') { $q = $db->prepare('SELECT id FROM crm_crews WHERE id=?'); $q->execute([$crewId]); if (!$q->fetchColumn()) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Бригада не найдена.'], 422); }
         if ($stageId !== '') { $q = $db->prepare('SELECT site_id FROM crm_construction_stages WHERE id=?'); $q->execute([$stageId]); if (!$siteId || $q->fetchColumn() !== $siteId) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Этап не относится к объекту.'], 422); }
         $taskId = crm_uuid();
-        $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$taskId, $orderId ?: null, $title, $description, $siteId ?: null, $assignee ?: null, $crewId ?: null, $stageId ?: null, $status, ($task['priority'] ?? '') === 'high' ? 'high' : 'normal', crm_sql_datetime($task['dueAt'] ?? ''), $quantity, $completed, crm_required_text($task['unit'] ?? 'задача', 'единица', 80), $status === 'blocked' ? $blockReason : '', '[]', null, '[]', (int)$user['id']]);
+        $db->prepare('INSERT INTO crm_tasks (id, order_id, title, description, site_id, assignee_id, assignee_ids_json, crew_id, construction_stage_id, status, priority, due_at, quantity, completed_quantity, unit_name, block_reason, checklist_json, original_due_at, reschedule_history_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')->execute([$taskId, $orderId ?: null, $title, $description, $siteId ?: null, $assignee ?: null, json_encode($assigneeIds, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $crewId ?: null, $stageId ?: null, $status, ($task['priority'] ?? '') === 'high' ? 'high' : 'normal', crm_sql_datetime($task['dueAt'] ?? ''), $quantity, $completed, crm_required_text($task['unit'] ?? 'задача', 'единица', 80), $status === 'blocked' ? $blockReason : '', '[]', null, '[]', (int)$user['id']]);
         if ($question !== '') $db->prepare("INSERT INTO crm_task_questions (task_id, question, requester_user_id, answer) VALUES (?, ?, ?, '')")->execute([$taskId, $question, (int)$user['id']]);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
-        if ($assignee !== '' && $assignee !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($assignee, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : $title, '#task/' . $taskId, 'task:create:' . $taskId);
+        foreach ($assigneeIds as $personId) if ($personId !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($personId, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : $title, '#task/' . $taskId, 'task:create:' . $taskId);
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.create', 'task', $taskId, ['assigneeId' => $assignee]);
@@ -292,10 +300,10 @@ if ($action === 'tasks.answer' && $method === 'POST') {
     $answer = crm_required_text($input['answer'] ?? '', 'ответ', 5000);
     $db = crm_db(); $db->beginTransaction();
     try {
-        $lookup = $db->prepare('SELECT t.id, t.title, t.assignee_id, t.status, q.question, q.answer AS previous_answer, q.requester_user_id FROM crm_tasks t JOIN crm_task_questions q ON q.task_id=t.id WHERE t.id=? FOR UPDATE');
+        $lookup = $db->prepare('SELECT t.id, t.title, t.assignee_id, t.assignee_ids_json, t.status, q.question, q.answer AS previous_answer, q.requester_user_id FROM crm_tasks t JOIN crm_task_questions q ON q.task_id=t.id WHERE t.id=? FOR UPDATE');
         $lookup->execute([$taskId]); $task = $lookup->fetch();
         if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Вопрос к задаче не найден.'], 404); }
-        if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
+        if (!crm_can($user, 'tasks.manage') && !in_array((string)($user['employeeId'] ?? ''), crm_task_assignee_ids($task), true)) {
             $db->rollBack(); crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Ответить может назначенный исполнитель.'], 403);
         }
         if ($task['previous_answer'] !== '') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_answered', 'message' => 'Ответ уже отправлен. Обновите задачу, чтобы увидеть его.'], 409); }
@@ -318,19 +326,22 @@ if ($action === 'tasks.comment' && $method === 'POST') {
     $body = crm_required_text($input['text'] ?? '', 'комментарий', 5000);
     $db = crm_db(); $db->beginTransaction();
     try {
-        $lookup = $db->prepare('SELECT id, site_id, assignee_id FROM crm_tasks WHERE id=? FOR UPDATE');
+        $lookup = $db->prepare('SELECT id, title, site_id, assignee_id, assignee_ids_json, created_by FROM crm_tasks WHERE id=? FOR UPDATE');
         $lookup->execute([$taskId]); $task = $lookup->fetch();
         if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Задача не найдена.'], 404); }
-        if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
+        if (!crm_can($user, 'tasks.manage') && !in_array((string)($user['employeeId'] ?? ''), crm_task_assignee_ids($task), true)) {
             $db->rollBack(); crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Комментировать задачу может назначенный исполнитель или руководитель.'], 403);
         }
         $id = crm_uuid();
         $insert = $db->prepare("INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,?,'note','note','internal',?,'',?,1,'[]','internal','',NOW(),?,?)");
         $insert->execute([$id, $task['site_id'] ?: null, $taskId, $id, $body, (int)$user['id'], $user['employeeId'] ?: null]);
+        foreach (crm_task_assignee_ids($task) as $personId) if ($personId !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($personId, 'message', 'Комментарий к задаче: ' . $task['title'], $body, '#task/' . $taskId, 'task-comment:' . $id);
+        if ((int)$task['created_by'] !== (int)$user['id']) crm_push_emit((int)$task['created_by'], 'message', 'Комментарий к задаче: ' . $task['title'], $body, '#task/' . $taskId, 'task-comment:' . $id);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.comment', 'task', $taskId, ['messageId' => $id]);
+    try { crm_push_dispatch(10); } catch (Throwable $error) { error_log('EFT CRM task comment push failed: ' . $error->getMessage()); }
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
 }
 
@@ -341,10 +352,10 @@ if ($action === 'tasks.complete' && $method === 'POST') {
     $result = crm_required_text($input['text'] ?? '', 'результат выполнения', 5000);
     $db = crm_db(); $db->beginTransaction();
     try {
-        $lookup = $db->prepare('SELECT id, site_id, assignee_id, status, quantity, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
+        $lookup = $db->prepare('SELECT id, site_id, assignee_id, assignee_ids_json, status, quantity, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
         $lookup->execute([$taskId]); $task = $lookup->fetch();
         if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Задача не найдена.'], 404); }
-        if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
+        if (!crm_can($user, 'tasks.manage') && !in_array((string)($user['employeeId'] ?? ''), crm_task_assignee_ids($task), true)) {
             $db->rollBack(); crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Завершить задачу может назначенный исполнитель или руководитель.'], 403);
         }
         if ($task['status'] === 'done') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_completed', 'message' => 'Задача уже завершена.'], 409); }
@@ -372,10 +383,10 @@ if ($action === 'tasks.check' && $method === 'POST') {
     $title = $checkId === '' ? crm_required_text($input['title'] ?? '', 'пункт проверки', 500) : '';
     $db = crm_db(); $db->beginTransaction();
     try {
-        $lookup = $db->prepare('SELECT id, site_id, assignee_id, status, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
+        $lookup = $db->prepare('SELECT id, site_id, assignee_id, assignee_ids_json, status, checklist_json FROM crm_tasks WHERE id=? FOR UPDATE');
         $lookup->execute([$taskId]); $task = $lookup->fetch();
         if (!$task) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Задача не найдена.'], 404); }
-        if (!crm_can($user, 'tasks.manage') && (!$user['employeeId'] || $user['employeeId'] !== $task['assignee_id'])) {
+        if (!crm_can($user, 'tasks.manage') && !in_array((string)($user['employeeId'] ?? ''), crm_task_assignee_ids($task), true)) {
             $db->rollBack(); crm_json(['ok' => false, 'code' => 'forbidden', 'message' => 'Чек-лист доступен назначенному исполнителю и руководителю.'], 403);
         }
         if ($task['status'] === 'done') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_completed', 'message' => 'Задача уже завершена.'], 409); }
