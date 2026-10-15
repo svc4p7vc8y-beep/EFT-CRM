@@ -3,3 +3,9 @@
 .task-assignee-picker summary::-webkit-details-marker{display:none}
 .task-assignee-menu{position:absolute;top:100%;left:0;z-index:20;min-width:230px;max-height:220px;overflow:auto;padding:8px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 24px #18342b29}
 .task-assignee-menu label{display:flex;align-items:center;gap:7px;padding:5px;font-size:12px;white-space:nowrap}
+.completed-tasks{margin:22px 0 0;border:1px solid #d6e4d5;border-radius:8px;overflow:hidden;background:#fff}
+.completed-tasks>h2{display:flex;align-items:center;gap:9px;padding:13px 15px;background:#eef7ed;color:#2c6942;font-size:14px}
+.completed-tasks>h2 span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 5px;border-radius:12px;background:#d7ead6;font-size:11px}
+.completed-tasks .my-task-row{opacity:.82}
+.completed-tasks .task-row-title strong{text-decoration:line-through;text-decoration-color:#80a58a}
+.completed-empty{padding:16px;color:var(--muted);font-size:12px}
