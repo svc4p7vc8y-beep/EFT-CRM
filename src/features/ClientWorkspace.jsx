@@ -1,15 +1,16 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
 import { Badge, Empty, VoiceInput } from '../components/UI.jsx';
 import { CallLink } from '../components/CallLink.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
 import { briefReadiness, CALCULATOR_URL, downloadCalculatorBrief } from '../app/buildingBrief.js';
+import { crmApi } from '../app/api.js';
 import '../components/building-brief.css';
 import './lead-discussion.css';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
 
-export function ClientWorkspace({ state, lead, currentEmployeeId = '', command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, onChat, notify }) {
+export function ClientWorkspace({ state, lead, liveSession = false, currentEmployeeId = '', command, onBack, onEditLead, onEditClient, onTransfer, onOpenTask, onChat, notify }) {
   const { client, site } = leadContext(state, lead);
   const [activityType, setActivityType] = useState('note');
   const [activityText, setActivityText] = useState('');
@@ -17,12 +18,14 @@ export function ClientWorkspace({ state, lead, currentEmployeeId = '', command, 
   const [recipientIds, setRecipientIds] = useState(lead.ownerId && lead.ownerId !== currentEmployeeId ? [lead.ownerId] : []);
   const [newAction, setNewAction] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [serverAttachments, setServerAttachments] = useState([]);
   const fileRef = useRef(null);
   const orders = useMemo(() => state.orders.filter((order) => order.siteId === site.id), [state.orders, site.id]);
   const orderIds = useMemo(() => new Set(orders.map((order) => order.id)), [orders]);
   const tasks = useMemo(() => state.tasks.filter((task) => orderIds.has(task.orderId)), [state.tasks, orderIds]);
   const events = useMemo(() => state.activities.filter((event) => event.siteId === site.id && !event.taskId).toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)), [state.activities, site.id]);
   const attachments = useMemo(() => state.attachments.filter((item) => item.siteId === site.id), [state.attachments, site.id]);
+  useEffect(() => { if (!liveSession) return; let active = true; crmApi.filesList(site.id).then((result) => { if (active) setServerAttachments(result.files); }).catch((error) => notify(error.message, true)); return () => { active = false; }; }, [liveSession, site.id]);
   const stageIndex = Math.max(0, LEAD_STAGES.findIndex((stage) => stage.id === lead.status));
   const progress = lead.status === 'lost' ? 0 : Math.round(((stageIndex + 1) / (LEAD_STAGES.length - 1)) * 100);
   const brief = site.buildingBrief || {};
@@ -70,10 +73,12 @@ export function ClientWorkspace({ state, lead, currentEmployeeId = '', command, 
     setUploading(true);
     try {
       for (const file of files) {
+        if (liveSession) { await crmApi.filesUpload(file, site.id); continue; }
         if (file.size > 800000) throw new Error(`${file.name}: максимальный размер 800 КБ`);
         const dataUrl = String(await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error(`Не удалось прочитать ${file.name}`)); reader.readAsDataURL(file); })).replace(/^data:;base64,/, 'data:application/octet-stream;base64,');
         command('attachment.add', { siteId: site.id, name: file.name, type: file.type, size: file.size, dataUrl });
       }
+      if (liveSession) setServerAttachments((await crmApi.filesList(site.id)).files);
       notify(files.length === 1 ? 'Вложение добавлено' : `Добавлено вложений: ${files.length}`);
     } catch (error) { notify(error.message, true); }
     finally { setUploading(false); event.target.value = ''; }
@@ -114,8 +119,8 @@ export function ClientWorkspace({ state, lead, currentEmployeeId = '', command, 
 
         <section className="client-panel"><div className="client-section-title"><div><Paperclip size={19} /><h2>Файлы, фотографии и переписки</h2></div><button className="button" disabled={uploading} onClick={() => fileRef.current?.click()}><Upload size={15}/>{uploading ? 'Загрузка…' : 'Прикрепить'}</button></div>
           <input ref={fileRef} className="sr-only" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.eml" onChange={uploadFiles}/>
-          <p className="client-file-hint">Файл до 800 КБ. В демонстрационной версии он хранится только в этом браузере.</p>
-          {attachments.length ? <div className="attachment-grid">{attachments.map((item) => <a className="attachment-card" href={item.dataUrl} download={item.name} key={item.id}>{item.type.startsWith('image/') ? <Image size={22}/> : <FileText size={22}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>)}</div> : <Empty title="Вложений пока нет">Добавьте фотографии объекта, документы или экспорт переписки.</Empty>}
+          <p className="client-file-hint">{liveSession ? 'Файлы до 8 МБ сохраняются на сервере и видны в общем списке CRM и калькулятора.' : 'Файл до 800 КБ. В демонстрационной версии он хранится только в этом браузере.'}</p>
+          {(liveSession ? serverAttachments.length : attachments.length) ? <div className="attachment-grid">{liveSession ? serverAttachments.map((item) => <a className="attachment-card" href={crmApi.filesDownloadUrl(item.id)} download={item.name} key={item.id}>{item.mime?.startsWith('image/') ? <Image size={22}/> : <FileText size={22}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>) : attachments.map((item) => <a className="attachment-card" href={item.dataUrl} download={item.name} key={item.id}>{item.type.startsWith('image/') ? <Image size={22}/> : <FileText size={22}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>)}</div> : <Empty title="Вложений пока нет">Добавьте фотографии объекта, документы или экспорт переписки.</Empty>}
         </section>
       </div>
 

@@ -171,6 +171,51 @@ if ($action === 'session' && $method === 'GET') {
     crm_json(['ok' => true, 'authenticated' => true, 'user' => $user, 'capabilities' => crm_capabilities((string)$user['role']), 'financeUnlocked' => crm_finance_unlocked(), 'csrf' => $_SESSION['csrf']]);
 }
 
+if ($action === 'files.list' && $method === 'GET') {
+    crm_user(); crm_schema_ensure_v30();
+    $siteId = trim((string)($_GET['siteId'] ?? ''));
+    if ($siteId !== '' && !preg_match('/^[a-f0-9-]{36}$/i', $siteId)) crm_json(['ok' => false, 'message' => 'Некорректный объект.'], 422);
+    $sql = 'SELECT f.id, f.site_id AS siteId, f.original_name AS name, f.mime_type AS mime, f.size_bytes AS size, f.created_at AS createdAt, u.display_name AS author, s.name AS siteName FROM crm_shared_files f JOIN crm_users u ON u.id=f.created_by LEFT JOIN crm_sites s ON s.id=f.site_id';
+    $statement = crm_db()->prepare($sql . ($siteId !== '' ? ' WHERE f.site_id=?' : '') . ' ORDER BY f.created_at DESC LIMIT 1000');
+    $statement->execute($siteId !== '' ? [$siteId] : []);
+    crm_json(['ok' => true, 'files' => $statement->fetchAll()]);
+}
+
+if ($action === 'files.upload' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    if ($user['role'] === 'viewer') crm_json(['ok' => false, 'message' => 'Нет прав на загрузку файлов.'], 403);
+    $siteId = trim((string)($_POST['siteId'] ?? '')) ?: null;
+    if ($siteId) {
+        $site = crm_db()->prepare('SELECT COUNT(*) FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+        if (!preg_match('/^[a-f0-9-]{36}$/i', $siteId) || !(int)$site->fetchColumn()) crm_json(['ok' => false, 'message' => 'Объект не найден.'], 404);
+    }
+    $file = $_FILES['file'] ?? null;
+    if (!is_array($file) || is_array($file['name'] ?? null) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)($file['tmp_name'] ?? ''))) crm_json(['ok' => false, 'message' => 'Выберите файл.'], 422);
+    $name = mb_substr(basename((string)$file['name']), 0, 255);
+    $extension = mb_strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    if ($name === '' || !in_array($extension, ['pdf','jpg','jpeg','png','webp','gif','doc','docx','xls','xlsx','csv','txt','ppt','pptx','zip','rar','7z','dwg','dxf','json','eml'], true)) crm_json(['ok' => false, 'message' => 'Тип файла не поддерживается.'], 422);
+    $size = (int)($file['size'] ?? 0);
+    if ($size < 1 || $size > 8 * 1024 * 1024) crm_json(['ok' => false, 'message' => 'Размер файла не должен превышать 8 МБ.'], 413);
+    $content = file_get_contents((string)$file['tmp_name']);
+    if ($content === false) throw new RuntimeException('Cannot read uploaded file');
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string)$file['tmp_name']) ?: 'application/octet-stream';
+    $id = crm_uuid();
+    crm_db()->prepare('INSERT INTO crm_shared_files (id,site_id,original_name,mime_type,size_bytes,content,created_by) VALUES (?,?,?,?,?,?,?)')->execute([$id,$siteId,$name,$mime,$size,$content,(int)$user['id']]);
+    crm_audit((int)$user['id'], 'files.upload', 'shared_file', $id, ['siteId' => $siteId, 'name' => $name]);
+    crm_json(['ok' => true, 'id' => $id], 201);
+}
+
+if ($action === 'files.download' && $method === 'GET') {
+    crm_user(); crm_schema_ensure_v30();
+    $id = (string)($_GET['id'] ?? '');
+    if (!preg_match('/^[a-f0-9-]{36}$/i', $id)) crm_json(['ok' => false, 'message' => 'Файл не найден.'], 404);
+    $statement = crm_db()->prepare('SELECT original_name,mime_type,size_bytes,content FROM crm_shared_files WHERE id=?'); $statement->execute([$id]);
+    $file = $statement->fetch(); if (!$file) crm_json(['ok' => false, 'message' => 'Файл не найден.'], 404);
+    header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (int)$file['size_bytes']);
+    header("Content-Disposition: attachment; filename*=UTF-8''" . rawurlencode($file['original_name']));
+    header('Cache-Control: private, no-store'); echo $file['content']; exit;
+}
+
 if ($action === 'logout' && $method === 'POST') {
     crm_require_origin();
     $user = crm_user();

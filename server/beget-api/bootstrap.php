@@ -48,7 +48,7 @@ function crm_db(): PDO {
 
 function crm_headers(): void {
     $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
-    if ($origin !== '' && in_array($origin, crm_config()['allowed_origins'] ?? [], true)) {
+    if ($origin !== '' && (in_array($origin, crm_config()['allowed_origins'] ?? [], true) || $origin === 'https://calc.eftsip.ru')) {
         header('Access-Control-Allow-Origin: ' . $origin);
         header('Access-Control-Allow-Credentials: true');
         header('Vary: Origin');
@@ -63,7 +63,7 @@ function crm_headers(): void {
 
 function crm_require_origin(): void {
     $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
-    if ($origin !== '' && !in_array($origin, crm_config()['allowed_origins'] ?? [], true)) {
+    if ($origin !== '' && !in_array($origin, crm_config()['allowed_origins'] ?? [], true) && $origin !== 'https://calc.eftsip.ru') {
         crm_json(['ok' => false, 'code' => 'origin_forbidden', 'message' => 'Источник запроса не разрешён.'], 403);
     }
 }
