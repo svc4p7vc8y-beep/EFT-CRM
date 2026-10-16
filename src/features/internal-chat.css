@@ -24,7 +24,7 @@
 .chat-conversation-head strong{font-size:16px}.chat-conversation-head span{font-size:11px;color:var(--muted);margin-top:3px}
 .chat-push-status{display:flex;align-items:center;gap:6px;margin:0;padding:7px 16px;border-bottom:1px solid var(--line);background:var(--surface,#fff);color:var(--muted);font-size:11px;line-height:1.4}
 .chat-context-link{font-size:11px;padding-inline:9px;min-height:34px}.chat-conversation-head .chat-back{display:none}
-.chat-message-list{display:flex;flex:1;flex-direction:column;gap:10px;overflow:auto;min-height:0;padding:18px;overscroll-behavior:contain}
+.chat-message-list{display:flex;flex:1;flex-direction:column;gap:10px;overflow:auto;min-height:0;padding:18px;overscroll-behavior:contain;background-image:linear-gradient(#f6f9f7ee,#f6f9f7ee),url('/eft-logo.jpg');background-position:center;background-size:cover,190px auto;background-repeat:no-repeat}
 .chat-message{align-self:flex-start;max-width:min(78%,620px);padding:11px 13px;border:1px solid #dce7e1;border-radius:10px 10px 10px 3px;background:#fff;box-shadow:0 2px 6px #1b39220b;overflow-wrap:anywhere}
 .chat-message.own{align-self:flex-end;border-color:#c6dfc1;border-radius:10px 10px 3px 10px;background:#e9f5e5}
 .chat-message strong{display:block;margin-bottom:4px;font-size:11px;color:#4d7847}
@@ -33,7 +33,17 @@
 .chat-attachment{display:flex;align-items:center;gap:8px;min-width:0;padding:7px;border:1px solid #d5e4da;border-radius:7px;background:var(--surface,#fff);color:var(--navy);text-decoration:none}
 .chat-attachment span{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
 .chat-attachment small{display:block;margin-top:2px;color:var(--muted);font-size:10px}
-.chat-attachment-image{display:block;padding:4px}.chat-attachment-image img{display:block;max-width:min(300px,100%);max-height:260px;object-fit:contain;border-radius:4px}.chat-attachment-image span{padding:5px}
+.chat-attachment-image{display:block;padding:4px}
+.chat-attachment-image-head{display:flex;align-items:center;gap:10px;padding:4px 5px}
+.chat-attachment-image-head a{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--navy);font-size:11px;text-decoration:none}
+.chat-attachment-image-head a:hover{text-decoration:underline}
+.chat-attachment-image-head button{flex:none;border:0;background:transparent;color:var(--navy);cursor:pointer;font:inherit;font-size:11px;text-decoration:underline}
+.chat-attachment-image-preview{display:block}
+.chat-attachment-image-preview img{display:block;max-width:min(300px,100%);max-height:260px;object-fit:contain;border-radius:4px}
+.chat-audio-attachment{display:grid;gap:6px;max-width:290px;padding:8px;border:1px solid #d5e4da;border-radius:7px;background:var(--surface,#fff)}.chat-audio-attachment span{display:flex;align-items:center;gap:5px;font-size:11px}.chat-audio-attachment audio{width:100%;height:36px}
+.chat-message-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}.chat-message-footer button{display:flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--muted);font-size:10px;cursor:pointer}.chat-message-footer button:hover{text-decoration:underline}.chat-message-footer time{margin:0}
+.chat-reply-preview{display:flex;align-items:center;gap:8px;padding:8px 15px;border-top:1px solid var(--line);background:var(--surface,#fff);font-size:11px}.chat-reply-preview>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat-reply-preview strong{display:block;color:var(--navy)}.chat-reply-preview button{border:0;background:transparent;color:var(--muted)}
+.chat-recording-status{margin:0;padding:7px 15px;background:#fff3ef;color:#a43d32;font-size:11px}.chat-record-button.recording{color:#d54134;border-color:#e4a29b}
 .chat-message time{display:block;margin-top:7px;text-align:right;color:#738b78;font-size:10px}
 .chat-receipt{position:relative;margin-top:5px;color:#68806f;font-size:10px}
 .chat-receipt.has-read{color:#197d8f}
@@ -61,6 +71,7 @@
 :root[data-theme="dark"] .chat-thread-item:hover,:root[data-theme="dark"] .chat-thread-item.active{background:#22372d}
 :root[data-theme="dark"] .chat-thread-copy strong,:root[data-theme="dark"] .chat-empty-conversation strong{color:#e4efe5}
 :root[data-theme="dark"] .chat-conversation{background:#18231c}:root[data-theme="dark"] .chat-message{background:#27372c;color:#e7efe8;border-color:#3d5543}:root[data-theme="dark"] .chat-message.own{background:#315239}
+:root[data-theme="dark"] .chat-message-list{background-image:linear-gradient(#18231cf0,#18231cf0),url('/eft-logo.jpg')}
 @media(min-width:761px) and (max-width:900px){.internal-chat-page{height:calc(100dvh - 124px - env(safe-area-inset-bottom))}}
 @media(max-width:760px){
   .internal-chat-page{display:block;height:auto}

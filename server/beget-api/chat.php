@@ -67,6 +67,9 @@ function crm_chat_uploads(): array {
         'application/zip' => ['zip','docx','xlsx'],
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => ['docx'],
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => ['xlsx'],
+        'audio/webm' => ['webm'], 'video/webm' => ['webm'],
+        'audio/ogg' => ['ogg'], 'application/ogg' => ['ogg'],
+        'audio/mp4' => ['m4a'], 'video/mp4' => ['m4a'], 'audio/x-m4a' => ['m4a'], 'application/mp4' => ['m4a'],
     ];
     $items = []; $total = 0;
     foreach ($group['name'] as $index => $originalName) {
@@ -77,8 +80,11 @@ function crm_chat_uploads(): array {
         if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
         $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
         $extension = strtolower(pathinfo((string)$originalName, PATHINFO_EXTENSION));
-        if (!isset($allowed[$mime]) || !in_array($extension, $allowed[$mime], true)) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены JPG, PNG, WEBP, HEIC, PDF, TXT, ZIP, DOCX и XLSX.'], 422);
+        if (!isset($allowed[$mime]) || !in_array($extension, $allowed[$mime], true)) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Этот формат файла не поддерживается.'], 422);
         if ($extension === 'jpeg') $extension = 'jpg';
+        if ($extension === 'webm') $mime = 'audio/webm';
+        if ($extension === 'ogg') $mime = 'audio/ogg';
+        if ($extension === 'm4a') $mime = 'audio/mp4';
         $items[] = ['temporary' => $temporary, 'key' => 'c-' . bin2hex(random_bytes(16)) . '.' . $extension,
             'name' => crm_text($originalName, 220), 'mime' => $mime, 'size' => $size];
     }
@@ -98,14 +104,14 @@ function crm_chat_handle(string $action, string $method): void {
     $db = crm_db(); $userId = (int)$user['id'];
     if ($action === 'chat.file' && $method === 'GET') {
         $key = (string)($_GET['key'] ?? '');
-        if (!preg_match('/^c-[a-f0-9]{32}\.(jpg|png|webp|heic|heif|pdf|txt|zip|docx|xlsx)$/', $key)) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Файл не найден.'], 404);
+        if (!preg_match('/^c-[a-f0-9]{32}\.(jpg|png|webp|heic|heif|pdf|txt|zip|docx|xlsx|webm|ogg|m4a)$/', $key)) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Файл не найден.'], 404);
         $lookup = $db->prepare('SELECT f.original_name, f.mime_type, f.size_bytes, m.thread_id FROM crm_chat_files f JOIN crm_chat_messages m ON m.id=f.message_id WHERE f.storage_key=? LIMIT 1');
         $lookup->execute([$key]); $file = $lookup->fetch();
         if (!$file) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Файл не найден.'], 404);
         crm_chat_thread((string)$file['thread_id'], $user);
         $path = dirname(__DIR__) . '/uploads/chat/' . $key;
         if (!is_file($path)) crm_json(['ok' => false, 'code' => 'not_found', 'message' => 'Файл не найден.'], 404);
-        $inline = in_array($file['mime_type'], ['image/jpeg','image/png','image/webp'], true);
+        $inline = in_array($file['mime_type'], ['image/jpeg','image/png','image/webp','audio/webm','audio/ogg','audio/mp4'], true);
         header('Content-Type: ' . $file['mime_type']);
         header('Content-Length: ' . filesize($path));
         header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . "; filename*=UTF-8''" . rawurlencode($file['original_name']));

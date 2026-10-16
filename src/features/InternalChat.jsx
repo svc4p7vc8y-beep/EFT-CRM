@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bell, Check, CheckCheck, FileText, MessageCircle, Paperclip, Plus, Send, Users, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, AudioLines, Bell, Check, CheckCheck, FileText, MessageCircle, Mic, Paperclip, Plus, Reply, Send, Square, Users, X } from 'lucide-react';
 import { Dialog, PageHeading, VoiceInput } from '../components/UI.jsx';
 import { demoChatApi } from './chatDemo.js';
 import './internal-chat.css';
@@ -18,12 +18,21 @@ function MessageReceipt({ messageId, currentUserId, receipts }) {
       : <div className="chat-receipt-details">Других активных участников пока нет.</div>}</details>;
 }
 
-function MessageAttachment({ file, fileUrl }) {
+function MessageAttachment({ file, fileUrl, onImageLoad }) {
+  const [expanded, setExpanded] = useState(true);
   const url = file.url || fileUrl?.(file.key);
   if (!url) return null;
   const preview = /^image\/(jpeg|png|webp)$/.test(file.mime || '');
-  return <a className={`chat-attachment ${preview ? 'chat-attachment-image' : ''}`} href={url} target="_blank" rel="noopener noreferrer" download={preview ? undefined : file.name}>
-    {preview ? <img src={url} alt={file.name} loading="lazy" /> : <FileText size={22} />}
+  if (/^audio\/(webm|ogg|mp4|mpeg)$/.test(file.mime || '')) return <div className="chat-audio-attachment"><span><Mic size={14}/>Голосовое сообщение</span><audio controls preload="none" src={url}>Ваш браузер не поддерживает аудио.</audio></div>;
+  if (preview) return <div className="chat-attachment chat-attachment-image">
+    <div className="chat-attachment-image-head">
+      <a href={url} target="_blank" rel="noopener noreferrer" title="Открыть изображение в новой вкладке">{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</a>
+      <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? 'Свернуть' : 'Показать'}</button>
+    </div>
+    {expanded ? <a className="chat-attachment-image-preview" href={url} target="_blank" rel="noopener noreferrer" aria-label={`Открыть ${file.name} в новой вкладке`}><img src={url} alt={file.name} loading="lazy" onLoad={onImageLoad} /></a> : null}
+  </div>;
+  return <a className="chat-attachment" href={url} target="_blank" rel="noopener noreferrer" download={file.name}>
+    <FileText size={22} />
     <span>{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</span>
   </a>;
 }
@@ -40,6 +49,8 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [hasMore, setHasMore] = useState(false);
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState([]);
+  const [replyTo, setReplyTo] = useState(null);
+  const [recording, setRecording] = useState(false);
   const [filter, setFilter] = useState('');
   const [create, setCreate] = useState(null);
   const [recipientSearch, setRecipientSearch] = useState('');
@@ -49,11 +60,22 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   const [mobileThread, setMobileThread] = useState(Boolean(requestedThreadId));
   const messagesRef = useRef(null);
   const fileInputRef = useRef(null);
+  const filesRef = useRef(files); filesRef.current = files;
+  const recorderRef = useRef(null);
+  const recordingTimerRef = useRef(null);
+  const shouldScrollRef = useRef(true);
+  const firstLoadRef = useRef(true);
   const loadedOlder = useRef(false);
   const lastReadRef = useRef({ threadId: '', messageId: 0 });
   const pendingReadRef = useRef({ threadId: '', messageId: 0 });
   const currentUserId = String(api.user?.id || 'me');
   const selected = threads.find((thread) => thread.id === selectedId);
+  useLayoutEffect(() => {
+    if (!messages.length || !shouldScrollRef.current || !messagesRef.current) return;
+    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    readVisibleMessages();
+  }, [messages, mobileThread, selectedId]);
+  useEffect(() => () => { window.clearTimeout(recordingTimerRef.current); if (recorderRef.current) { recorderRef.current.onstop = null; if (recorderRef.current.state === 'recording') recorderRef.current.stop(); recorderRef.current.stream.getTracks().forEach((track) => track.stop()); } }, []);
 
   function readVisibleMessages() {
     const pending = pendingReadRef.current;
@@ -92,7 +114,7 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   useEffect(() => {
     if (!selectedId) return undefined;
     let active = true;
-    setMessages([]); setReceipts([]); setHasMore(false); loadedOlder.current = false;
+    setMessages([]); setReceipts([]); setHasMore(false); loadedOlder.current = false; firstLoadRef.current = true; shouldScrollRef.current = true;
     const refresh = async () => {
       if (document.visibilityState === 'hidden') return;
       if (window.matchMedia('(max-width: 760px)').matches && !mobileThread) return;
@@ -100,7 +122,9 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
         const result = await apiRef.current.chatMessages(selectedId);
         if (!active) return;
         const list = messagesRef.current;
-        const wasAtBottom = !list || list.scrollHeight - list.scrollTop - list.clientHeight <= 90;
+        const wasAtBottom = firstLoadRef.current || !list || list.scrollHeight - list.scrollTop - list.clientHeight <= 90;
+        firstLoadRef.current = false;
+        shouldScrollRef.current = wasAtBottom;
         setReceipts(result.receipts || []);
         setMessages((previous) => {
           const byId = new Map(previous.map((message) => [message.id, message]));
@@ -110,10 +134,6 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
         if (!loadedOlder.current) setHasMore(Boolean(result.hasMore));
         const latestId = result.messages.at(-1)?.id || 0;
         pendingReadRef.current = { threadId: selectedId, messageId: latestId };
-        requestAnimationFrame(() => { if (active && wasAtBottom && messagesRef.current) {
-          messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-          readVisibleMessages();
-        } });
       } catch (failure) { if (active) setError(failure.message); }
     };
     refresh(); const timer = window.setInterval(refresh, 6000);
@@ -121,32 +141,69 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   }, [selectedId, mobileThread]);
 
   function selectThread(id) {
-    setSelectedId(id); setMobileThread(true); setError(''); setDraft(''); setFiles([]);
+    cancelRecording();
+    filesRef.current = [];
+    setSelectedId(id); setMobileThread(true); setError(''); setDraft(''); setFiles([]); setReplyTo(null);
     onSelectThread(id);
   }
   function queueFiles(selected) {
-    const next = [...files, ...Array.from(selected || [])];
+    const next = [...filesRef.current, ...Array.from(selected || [])];
     if (next.length > 5 || next.some((file) => file.size < 1 || file.size > 10 * 1024 * 1024) || next.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024) {
       setError('До пяти файлов: каждый не больше 10 МБ, вместе не больше 25 МБ.'); return;
     }
-    setFiles(next); setError('');
+    filesRef.current = next; setFiles(next); setError('');
+  }
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { setError('Запись голоса не поддерживается этим браузером.'); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        window.clearTimeout(recordingTimerRef.current);
+        setRecording(false);
+        if (!chunks.length) return;
+        const rawType = recorder.mimeType.split(';')[0] || 'audio/webm';
+        const type = rawType.includes('webm') ? 'audio/webm' : rawType.includes('ogg') ? 'audio/ogg' : rawType;
+        const extension = type.includes('mp4') || type.includes('m4a') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+        queueFiles([new File(chunks, `Голосовое-${Date.now()}.${extension}`, { type })]);
+      };
+      recorderRef.current = recorder;
+      recorder.start(); setRecording(true); setError('');
+      recordingTimerRef.current = window.setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 120000);
+    } catch (failure) { setError(failure.name === 'NotAllowedError' ? 'Разрешите доступ к микрофону для записи голосового сообщения.' : `Не удалось записать голос: ${failure.message}`); }
+  }
+  function stopRecording() { if (recorderRef.current?.state === 'recording') recorderRef.current.stop(); }
+  function cancelRecording() {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    recorder.onstop = null;
+    if (recorder.state === 'recording') recorder.stop();
+    recorder.stream.getTracks().forEach((track) => track.stop());
+    window.clearTimeout(recordingTimerRef.current);
+    recorderRef.current = null; setRecording(false);
   }
   async function loadPrevious() {
     if (!messages.length) return;
     try {
       const result = await apiRef.current.chatMessages(selectedId, messages[0].id);
       loadedOlder.current = true;
+      shouldScrollRef.current = false;
       setMessages((previous) => [...result.messages, ...previous]); setHasMore(Boolean(result.hasMore));
     } catch (failure) { setError(failure.message); }
   }
   async function submitMessage(event) {
-    event.preventDefault(); const body = draft.trim(); if ((!body && !files.length) || !selectedId || sending) return;
+    event.preventDefault(); const text = draft.trim(); if ((!text && !files.length) || !selectedId || sending || recording) return;
+    const excerpt = replyTo ? (replyTo.body || replyTo.attachments?.[0]?.name || 'Вложение').replace(/\s+/g, ' ').slice(0, 150) : '';
+    const body = replyTo ? `↪ ${replyTo.authorName}: ${excerpt}\n\n${text}`.trim() : text;
     setSending(true); setError('');
     try {
       const result = await apiRef.current.chatSend(selectedId, body, files);
       setMessages((previous) => previous.some((message) => message.id === result.message.id) ? previous : [...previous, result.message]);
-      setDraft(''); setFiles([]); await loadThreads();
-      requestAnimationFrame(() => { if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight; });
+      filesRef.current = []; setDraft(''); setFiles([]); setReplyTo(null); shouldScrollRef.current = true; await loadThreads();
     } catch (failure) { setError(failure.message); }
     finally { setSending(false); }
   }
@@ -179,9 +236,11 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
       </aside>
       <div className="chat-conversation">{selected ? <><header className="chat-conversation-head"><button className="icon-button chat-back" aria-label="К списку чатов" onClick={() => setMobileThread(false)}><ArrowLeft size={21} /></button><div><strong>{selected.title}</strong><span>{selected.type === 'all' ? `Все пользователи CRM · ${selected.memberIds.length}` : memberNames.length ? memberNames.join(', ') : typeNames[selected.type]}</span></div>{selected.contextId ? <button className="button chat-context-link" onClick={() => onOpenContext(selected.type, selected.contextId)}>Открыть {selected.type === 'task' ? 'задачу' : 'заявку'}</button> : null}</header>
         {runtime.mode === 'server' && directPeer ? <p className="chat-push-status"><Bell size={13} />{notificationStatus(directPeer)}. Сообщения сохраняются в CRM независимо от уведомлений.</p> : null}
-        <div className="chat-message-list" ref={messagesRef} onScroll={readVisibleMessages}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong>{message.body ? <p>{message.body}</p> : null}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((file) => <MessageAttachment file={file} fileUrl={api.chatFileUrl} key={file.key} />)}</div> : null}<time>{stamp(message.createdAt)}</time>{String(message.authorId) === currentUserId ? <MessageReceipt messageId={message.id} currentUserId={currentUserId} receipts={receipts} /> : null}</article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
+        <div className="chat-message-list" ref={messagesRef} onScroll={() => { const list = messagesRef.current; if (list) shouldScrollRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= 90; readVisibleMessages(); }}>{hasMore ? <button className="button chat-older" onClick={loadPrevious}>Показать предыдущие</button> : null}{messages.length ? messages.map((message) => <article key={message.id} className={`chat-message ${String(message.authorId) === currentUserId ? 'own' : ''}`}><strong>{message.authorName}</strong>{message.body ? <p>{message.body}</p> : null}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((file) => <MessageAttachment file={file} fileUrl={api.chatFileUrl} onImageLoad={() => { if (shouldScrollRef.current && messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight; }} key={file.key} />)}</div> : null}<div className="chat-message-footer"><button type="button" onClick={() => setReplyTo(message)} aria-label={`Ответить на сообщение ${message.authorName}`}><Reply size={14}/>Ответить</button><time>{stamp(message.createdAt)}</time></div>{String(message.authorId) === currentUserId ? <MessageReceipt messageId={message.id} currentUserId={currentUserId} receipts={receipts} /> : null}</article>) : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Пока нет сообщений</strong><span>Напишите первое сообщение участникам.</span></div>}</div>
         {files.length ? <div className="chat-file-queue">{files.map((file, index) => <span key={`${file.name}-${index}`}><Paperclip size={13} />{file.name}<button type="button" aria-label={`Убрать ${file.name}`} onClick={() => setFiles((current) => current.filter((_, position) => position !== index))}><X size={13} /></button></span>)}</div> : null}
-        <form className="chat-compose" onSubmit={submitMessage}><input ref={fileInputRef} type="file" multiple hidden accept="image/*,.pdf,.txt,.zip,.docx,.xlsx" onChange={(event) => { queueFiles(event.target.files); event.target.value = ''; }} /><button className="button chat-attach-button" type="button" aria-label="Прикрепить фотографии или файлы" title="Прикрепить фотографии или файлы" onClick={() => fileInputRef.current?.click()}><Paperclip size={19} /></button><VoiceInput><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); queueFiles(event.clipboardData.files); } }} maxLength={5000} rows={2} placeholder="Сообщение или файл…" aria-label="Текст сообщения" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></VoiceInput><button className="button primary" type="submit" disabled={sending || (!draft.trim() && !files.length)} aria-label="Отправить сообщение"><Send size={19} /><span>{sending ? 'Отправляем…' : 'Отправить'}</span></button></form>
+        {replyTo ? <div className="chat-reply-preview"><Reply size={15}/><span><strong>Ответ для {replyTo.authorName}</strong>{(replyTo.body || replyTo.attachments?.[0]?.name || 'Вложение').slice(0, 130)}</span><button type="button" aria-label="Отменить ответ" onClick={() => setReplyTo(null)}><X size={17}/></button></div> : null}
+        {recording ? <p className="chat-recording-status">Идёт запись голосового сообщения · нажмите квадрат для завершения</p> : null}
+        <form className="chat-compose" onSubmit={submitMessage}><input ref={fileInputRef} type="file" multiple hidden accept="image/*,.pdf,.txt,.zip,.docx,.xlsx,audio/webm,audio/ogg,audio/mp4,.m4a" onChange={(event) => { queueFiles(event.target.files); event.target.value = ''; }} /><button className="button chat-attach-button" type="button" aria-label="Прикрепить фотографии или файлы" title="Прикрепить фотографии или файлы" onClick={() => fileInputRef.current?.click()}><Paperclip size={19} /></button><button className={`button chat-record-button ${recording ? 'recording' : ''}`} type="button" aria-label={recording ? 'Остановить запись' : 'Записать голосовое сообщение'} title={recording ? 'Остановить запись' : 'Записать голосовое сообщение'} onClick={recording ? stopRecording : startRecording}>{recording ? <Square size={18}/> : <AudioLines size={19}/>}</button><VoiceInput><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { if (event.clipboardData.files.length) { event.preventDefault(); queueFiles(event.clipboardData.files); } }} maxLength={5000} rows={2} placeholder="Сообщение или файл…" aria-label="Текст сообщения" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /></VoiceInput><button className="button primary" type="submit" disabled={sending || recording || (!draft.trim() && !files.length)} aria-label="Отправить сообщение"><Send size={19} /><span>{sending ? 'Отправляем…' : 'Отправить'}</span></button></form>
         <p className="chat-delivery-hint"><Bell size={13} />Доставка отмечается при получении чатов в CRM, прочтение — при открытии диалога. Push сам по себе не означает прочтение.</p>
       </> : <div className="chat-empty-conversation"><MessageCircle size={32} /><strong>Выберите чат</strong></div>}</div>
     </div>
