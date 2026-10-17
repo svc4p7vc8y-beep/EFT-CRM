@@ -1,0 +1,111 @@
+.communications-page{--dialog-surface:#fff;--dialog-soft:#f7fafb;--dialog-thread:#f3f7f7;--dialog-ink:#20394b;--dialog-subtle:#637b8b;overflow:visible}
+.communications-page .page-heading{margin-bottom:17px}
+.communications-page .page-heading h1{font-size:27px}
+.communication-heading-actions{align-items:center;gap:8px}
+.communication-heading-actions .button{min-height:38px}
+.communication-more,.dialog-filter-more,.dialog-thread-menu{position:relative;flex:none}
+.communication-more>summary,.dialog-filter-more>summary,.dialog-thread-menu>summary{display:grid;place-items:center;width:38px;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--dialog-surface);color:var(--dialog-subtle);cursor:pointer;list-style:none}
+.communication-more>summary::-webkit-details-marker,.dialog-filter-more>summary::-webkit-details-marker,.dialog-thread-menu>summary::-webkit-details-marker,.communication-workflow>summary::-webkit-details-marker{display:none}
+.communication-more[open]>summary,.dialog-filter-more[open]>summary,.dialog-thread-menu[open]>summary{color:var(--teal);border-color:var(--teal)}
+.communication-more>div,.dialog-filter-more>div,.dialog-thread-menu>div{position:absolute;top:calc(100% + 7px);right:0;z-index:12;display:grid;gap:2px;min-width:215px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--dialog-surface);box-shadow:0 16px 40px #1837462b}
+.communication-more>div button,.dialog-filter-more>div button,.dialog-thread-menu>div button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--dialog-ink);text-align:left;font-size:12px;white-space:nowrap}
+.communication-more>div button:hover,.dialog-filter-more>div button:hover,.dialog-thread-menu>div button:hover{background:var(--dialog-soft);color:var(--teal)}
+.communication-workspace{display:grid;grid-template-columns:minmax(300px,365px) minmax(0,1fr);grid-template-rows:54px minmax(0,1fr);height:calc(100dvh - 158px);min-height:570px;border-radius:12px;background:var(--dialog-surface);box-shadow:0 5px 22px #15364a0b}
+.dialog-channel-bar{grid-column:1/-1;display:flex;align-items:stretch;gap:3px;min-width:0;padding:0 12px;border-bottom:1px solid var(--line);background:var(--dialog-surface);overflow-x:auto;scrollbar-width:thin}
+.dialog-channel-bar button{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;min-height:50px;padding:0 13px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--dialog-subtle);font-size:12px;font-weight:600;white-space:nowrap}
+.dialog-channel-bar button:hover,.dialog-channel-bar button.active{color:var(--teal);background:var(--dialog-soft)}
+.dialog-channel-bar button.active{border-bottom-color:var(--teal)}
+.dialog-channel-bar b,.conversation-meta b{display:grid;place-items:center;min-width:19px;height:19px;padding:0 5px;border-radius:20px;background:var(--teal);color:#fff;font-size:10px}
+.conversation-column{grid-column:1;grid-row:2;min-height:0;background:var(--dialog-surface)}
+.dialog-list-controls{position:sticky;top:0;z-index:5;padding:14px 13px 11px;border-bottom:1px solid var(--line);background:var(--dialog-surface)}
+.dialog-list-search{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--dialog-soft);color:var(--dialog-subtle)}
+.dialog-list-search:focus-within{border-color:var(--teal)}
+.dialog-list-search input{flex:1;width:100%;height:36px;padding:0;border:0;outline:none;background:transparent;font-size:12px}
+.dialog-list-search button{display:grid;place-items:center;width:25px;height:25px;padding:0;border:0;background:transparent;color:var(--dialog-subtle)}
+.dialog-filter-row{display:flex;align-items:center;gap:5px;margin-top:10px;white-space:nowrap}
+.dialog-filter-row>button{min-height:31px;padding:5px 9px;border:0;border-radius:6px;background:transparent;color:var(--dialog-subtle);font-size:11px;font-weight:600}
+.dialog-filter-row>button:hover,.dialog-filter-row>button.active{background:#e7f3f3;color:var(--teal)}
+.dialog-filter-more{margin-left:auto}
+.dialog-filter-more>summary{width:31px;height:31px;border:0}
+.conversation-card{grid-template-columns:43px minmax(0,1fr) auto;gap:11px;align-items:center;min-height:84px;padding:11px 13px;background:var(--dialog-surface)}
+.conversation-card:hover,.conversation-card.active{background:#eef8f8}
+.conversation-avatar{width:43px;height:43px;font-size:12px}
+.conversation-copy strong{font-size:13px;color:var(--dialog-ink)}
+.conversation-copy small{margin:3px 0 4px;font-size:11px}
+.conversation-copy>span{font-size:12px;line-height:1.35}
+.conversation-meta time{font-size:10px;max-width:77px}
+.unassigned-caption{font-size:11px;min-height:39px}
+.thread-column{grid-column:2;grid-row:2;min-height:0;background:var(--dialog-thread)}
+.thread-header{min-height:67px;padding:11px 17px;background:var(--dialog-surface)}
+.thread-header .dialog-thread-identity{flex:1;min-width:0}
+.thread-header .dialog-thread-identity strong{font-size:15px;color:var(--dialog-ink)}
+.thread-header .dialog-thread-identity span{font-size:11px}
+.dialog-thread-header-actions{display:flex;align-items:center;gap:7px;flex:none}
+.dialog-client-link{min-height:35px;padding:7px 10px;font-size:12px}
+.dialog-thread-menu>summary{width:35px;height:35px}
+.communications-page .mobile-thread-back{display:none}
+.message-thread{min-height:0;padding:18px 24px;scrollbar-gutter:auto}
+.message-bubble{border-radius:12px 12px 12px 3px;padding:12px 14px}
+.message-bubble.outgoing{border-radius:12px 12px 3px 12px;background:#e3f5f2}
+.message-bubble>header small{font-size:11px}
+.message-bubble>header button{opacity:1;width:27px;height:27px}
+.message-bubble p{font-size:13px;line-height:1.55}
+.message-bubble footer{font-size:10px}
+.message-files a{font-size:11px}
+.communication-workflow{display:block;margin-top:9px;padding-top:7px}
+.communication-workflow>summary{cursor:pointer;color:var(--dialog-subtle);font-size:10px;list-style:none}
+.communication-workflow>summary:hover{color:var(--teal)}
+.communication-workflow>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px}
+.message-composer{padding:11px 16px 12px;background:var(--dialog-surface)}
+.message-composer .composer-row{grid-template-columns:136px minmax(0,1fr) 42px 44px;align-items:end}
+.message-composer textarea{max-height:94px;font-size:13px}
+.message-composer>small{font-size:10px}
+.quick-replies{gap:6px;margin-bottom:8px}
+.quick-replies button{padding:5px 9px;font-size:10px}
+.reply-preview{font-size:11px}
+.communication-duplicates{display:block}
+.communication-duplicates>summary{display:flex;align-items:center;gap:7px;cursor:pointer}
+.communication-duplicates>div{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+@media(max-width:1050px){.communication-workspace{grid-template-columns:minmax(275px,34%) minmax(0,1fr)}.dialog-channel-bar button{padding-inline:10px}.dialog-client-link{font-size:0;gap:0}.dialog-client-link svg{width:17px;height:17px}}
+@media(max-width:760px){
+  .communications-page{padding-bottom:90px}
+  .communications-page .page-heading{align-items:flex-start;gap:11px;margin-bottom:13px}
+  .communications-page .page-heading>div{width:auto}
+  .communications-page .page-heading h1{font-size:22px}
+  .communications-page .page-heading p{display:none}
+  .communication-heading-actions .button{min-width:38px;width:38px;height:38px;padding:0}
+  .communication-heading-actions .button span{display:none}
+  .communication-more>summary{width:38px;height:38px}
+  .communications-page .communication-workspace{display:flex;flex-direction:column;height:auto;min-height:calc(100dvh - 188px);overflow:visible}
+  .dialog-channel-bar{flex:0 0 auto;min-height:48px;padding:0 6px;overflow-x:auto}
+  .dialog-channel-bar button{min-height:47px;padding:0 10px;font-size:11px}
+  .dialog-channel-bar button svg{width:15px}
+  .communications-page .conversation-column{flex:1;min-height:350px;max-height:none;overflow:visible;border-right:0}
+  .dialog-list-controls{padding:11px 10px 9px}
+  .dialog-filter-row{gap:2px}
+  .dialog-filter-row>button{padding-inline:7px;font-size:10px}
+  .conversation-card{min-height:76px;padding:10px 12px}
+  .communications-page .thread-column{display:none}
+  .communications-page .mobile-thread-open .dialog-channel-bar,.communications-page .mobile-thread-open .conversation-column{display:none}
+  .communications-page .mobile-thread-open .thread-column{position:fixed;inset:60px 0 calc(64px + env(safe-area-inset-bottom)) 0;z-index:25;display:flex;height:auto;min-height:0;overflow:hidden;border-radius:0}
+  .communications-page .mobile-thread-back{display:grid;place-items:center;flex:none;width:38px;height:38px;transform:none}
+  .communications-page .thread-header{min-height:59px;padding:8px 10px;flex-wrap:nowrap}
+  .communications-page .thread-header .dialog-thread-identity{flex:1 1 auto;min-width:0}
+  .dialog-thread-header-actions{flex:none}
+  .dialog-client-link{display:none}
+  .communications-page .mobile-thread-open .message-thread{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;padding:12px 10px}
+  .communications-page .message-bubble{width:min(93%,590px)}
+  .communications-page .mobile-thread-open .message-composer{flex:0 0 auto;max-height:43dvh;overflow-y:auto;padding:8px 10px calc(10px + env(safe-area-inset-bottom))}
+  .communications-page .message-composer .composer-row{grid-template-columns:minmax(0,1fr) 36px 40px;gap:5px}
+  .communications-page .message-composer .composer-row>select{grid-column:1/-1}
+  .message-composer select{padding:5px;font-size:11px}
+  .message-composer .button{width:40px}
+  .message-composer .attach-button{width:36px}
+  .message-composer textarea{font-size:16px;min-height:42px}
+  .quick-replies{margin-bottom:5px}
+  .quick-replies button{font-size:10px}
+}
+:root[data-theme="dark"] .communications-page{--dialog-surface:#16222b;--dialog-soft:#1d3038;--dialog-thread:#101b22;--dialog-ink:#e5edf2;--dialog-subtle:#a4b7c2}
+:root[data-theme="dark"] .communications-page :is(.communication-workspace,.conversation-column,.thread-header,.message-composer,.dialog-channel-bar,.dialog-list-controls,.conversation-card,.dialog-list-search){background:var(--dialog-surface);border-color:#33434f}
+:root[data-theme="dark"] .communications-page :is(.dialog-channel-bar button:hover,.dialog-channel-bar button.active,.dialog-filter-row>button:hover,.dialog-filter-row>button.active,.conversation-card:hover,.conversation-card.active){background:#203740}
+:root[data-theme="dark"] .communications-page .message-bubble.outgoing{background:#18383c}

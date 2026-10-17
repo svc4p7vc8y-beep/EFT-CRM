@@ -26,6 +26,7 @@ import './app.css';
 import './operations.css';
 import '../features/communications.css';
 import './mobile.css';
+import '../features/communications-dialogs.css';
 
 const navigation = [
   { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'construction', label: 'Строительство', icon: House }, { id: 'communications', label: 'Общение', icon: MessageSquare }, { id: 'chat', label: 'Внутренний чат', icon: MessageCircle },
