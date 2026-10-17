@@ -22,11 +22,20 @@ import { Logistics } from '../features/Logistics.jsx';
 import { SharedFiles } from '../features/SharedFiles.jsx';
 import { INVENTORY_ACTIONS, RELEASE } from './operations.js';
 import { employeeFromApi } from './api.js';
+import '@fontsource/golos-text/cyrillic-400.css';
+import '@fontsource/golos-text/cyrillic-500.css';
+import '@fontsource/golos-text/cyrillic-600.css';
+import '@fontsource/golos-text/cyrillic-700.css';
+import '@fontsource/golos-text/latin-400.css';
+import '@fontsource/golos-text/latin-500.css';
+import '@fontsource/golos-text/latin-600.css';
+import '@fontsource/golos-text/latin-700.css';
 import './app.css';
 import './operations.css';
 import '../features/communications.css';
 import './mobile.css';
 import '../features/communications-dialogs.css';
+import './mobile-brand.css';
 
 const navigation = [
   { id: 'overview', label: 'Обзор', icon: Home }, { id: 'leads', label: 'Заявки', icon: ClipboardList }, { id: 'clients', label: 'Клиенты и объекты', icon: Users }, { id: 'construction', label: 'Строительство', icon: House }, { id: 'communications', label: 'Общение', icon: MessageSquare }, { id: 'chat', label: 'Внутренний чат', icon: MessageCircle },
