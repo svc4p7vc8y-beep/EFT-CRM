@@ -469,11 +469,12 @@ function crm_inventory_save(array $inventory, array $user, int $baseRevision): a
 
 function crm_workspace_for_user(array $user): array {
     $workspace = crm_public_workspace();
-    if (crm_can($user, 'integrations.manage')) return $workspace;
+    if (crm_can($user, 'integrations.manage')) return array_merge($workspace, ['unassignedMaxAccess' => true]);
     if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) {
+        $maxAccess = crm_can_handle_unassigned($user, 'max');
         $taskIds = array_fill_keys(array_column($workspace['tasks'], 'id'), true);
-        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== '' || ($activity['taskId'] !== '' && isset($taskIds[$activity['taskId']]))));
-        return $workspace;
+        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== '' || ($activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])) || ($maxAccess && $activity['channel'] === 'max' && $activity['siteId'] === '')));
+        return array_merge($workspace, ['unassignedMaxAccess' => $maxAccess]);
     }
     $tasks = $workspace['tasks'];
     if (!crm_can($user, 'tasks.manage') && !crm_can($user, 'tasks.view')) {
@@ -490,9 +491,15 @@ function crm_workspace_for_user(array $user): array {
     $activities = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])));
     $constructionStages = array_values(array_filter($workspace['constructionStages'], static fn(array $stage): bool => isset($siteIds[$stage['siteId']])));
     $logistics = array_values(array_filter($workspace['logistics'], static fn(array $route): bool => isset($siteIds[$route['siteId']])));
-    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages, 'logistics' => $logistics]);
+    return array_merge($workspace, ['clients' => $clients, 'sites' => $sites, 'leads' => [], 'orders' => $orders, 'tasks' => $tasks, 'activities' => $activities, 'constructionStages' => $constructionStages, 'logistics' => $logistics, 'unassignedMaxAccess' => false]);
 }
 
+function crm_can_handle_unassigned(array $user, string $channel): bool {
+    if (crm_can($user, 'integrations.manage')) return true;
+    if ($channel !== 'max' || !crm_can($user, 'clients.manage')) return false;
+    $config = crm_integration_config('max');
+    return in_array((int)$user['id'], array_map('intval', (array)($config['notification_user_ids'] ?? [])), true);
+}
 function crm_sql_datetime(mixed $value): ?string {
     $text = trim((string)$value);
     if ($text === '') return null;
@@ -790,7 +797,7 @@ function crm_http_multipart(string $url, array $payload): array {
     return is_array($data)?$data:[];
 }
 
-function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = []): array {
+function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = [], string $maxChatId = ''): array {
     if (in_array($channel, ['note','call'], true)) return ['status' => 'internal', 'externalKey' => ''];
     if ($channel === 'email') {
         $config = crm_integration_config('mail');
@@ -829,7 +836,7 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         return ['status' => 'sent', 'externalKey' => (string)($result['messages'][0]['id'] ?? '')];
     }
     if ($channel === 'max') {
-        $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=(string)($map[$siteId]??'');
+        $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=$maxChatId!==''?$maxChatId:(string)($map[$siteId]??'');
         if(empty($config['enabled'])||$token==='') return ['status'=>'saved','externalKey'=>''];
         if($chatId===''||!preg_match('/^-?\d+$/',$chatId)) throw new RuntimeException('Для объекта не указан MAX chat ID.');
         $last=[];foreach(mb_str_split($body,4000) as $part)$last=crm_http_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode($chatId),['text'=>$part,'notify'=>true],['Authorization: '.$token]);

@@ -56,6 +56,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const canCreateTask = canManageTasks || (runtime.capabilities?.includes('tasks.self') && Boolean(sessionUser?.employeeId));
   const canSaveInventory = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('procurement.manage');
   const canManageIntegrations = !liveSession || runtime.capabilities?.includes('*') || runtime.capabilities?.includes('integrations.manage');
+  const canHandleUnassigned = canManageIntegrations || Boolean(runtime.serverData?.unassignedMaxAccess);
   const [serverOverride, setServerOverride] = useState(null);
   const [inventoryOverride, setInventoryOverride] = useState(null);
   const revisionRef = useRef(Number(runtime.serverData?.workspaceRevision || 0));
@@ -277,8 +278,13 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
-  async function assignCommunication(messageId, siteId) {
-    const result = await runtime.assignCommunication(messageId, siteId);
+  async function assignCommunication(messageId, targetType, targetId) {
+    const result = await runtime.assignCommunication(messageId, targetType, targetId);
+    if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
+    return result;
+  }
+  async function replyUnassigned(messageId, text, subject) {
+    const result = await runtime.replyUnassigned(messageId, text, subject);
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
@@ -346,7 +352,25 @@ export function App({ runtime = { mode: 'demo' } }) {
   const closeModal = () => setModal(null);
   const modalLead = state.leads.find((l) => l.id === modal?.id); const modalTask = state.tasks.find((t) => t.id === modal?.id);
   let dialog = null;
-  if (modal?.type === 'lead-new' || (modal?.type === 'lead-edit' && modalLead)) dialog = <Dialog key={`${modal.type}-${modal.id}`} title={modal.type === 'lead-new' ? 'Новая заявка' : 'Изменить заявку'} onClose={closeModal} wide><LeadForm state={state} lead={modalLead} site={state.sites.find((site) => site.id === modalLead?.siteId)} onClose={closeModal} onSubmit={(p) => { const next = mutate(modal.type === 'lead-new' ? 'lead.create' : 'lead.update', { ...p, id: modal?.id }, modal.type === 'lead-new' ? 'Заявка создана' : 'Заявка обновлена'); if (modal.type === 'lead-new') openLead(next.leads[0].id); closeModal(); }} /></Dialog>;
+  if (modal?.type === 'lead-new' || (modal?.type === 'lead-edit' && modalLead)) {
+    const fromMessage = modal.type === 'lead-new' && Boolean(modal.sourceMessageId);
+    const defaults = fromMessage ? { name: modal.sourceChannel === 'email' ? 'Новый клиент' : modal.sourceName, email: modal.sourceChannel === 'email' ? modal.sourceName : '', siteName: 'Запрос с сайта', source: modal.sourceChannel === 'max' ? 'MAX · сайт' : 'Почта · сайт', nextAction: 'Ответить на обращение', notes: modal.sourceText?.slice(0, 5000) || '' } : {};
+    dialog = <Dialog key={`${modal.type}-${modal.id || modal.sourceMessageId || ''}`} title={modal.type === 'lead-new' ? 'Новая заявка' : 'Изменить заявку'} onClose={closeModal} wide><LeadForm state={state} lead={modalLead} site={state.sites.find((site) => site.id === modalLead?.siteId)} defaults={defaults} onClose={closeModal} onSubmit={async (p) => {
+      const next = mutate(modal.type === 'lead-new' ? 'lead.create' : 'lead.update', { ...p, id: modal?.id }, modal.type === 'lead-new' ? 'Заявка создана' : 'Заявка обновлена');
+      if (modal.type === 'lead-new') {
+        const leadId = next.leads[0].id;
+        if (fromMessage && liveSession) {
+          await saveQueue.current;
+          const fresh = await runtime.refreshWorkspace?.();
+          if (!fresh?.leads?.some((item) => item.id === leadId)) throw new Error('Заявка не сохранилась на сервере. Проверьте подключение и повторите.');
+          try { await assignCommunication(modal.sourceMessageId, 'lead', leadId); }
+          catch (error) { setToast({ text: `Заявка создана, но диалог не связан: ${error.message}`, error: true }); }
+        }
+        openLead(leadId);
+      }
+      closeModal();
+    }} /></Dialog>;
+  }
   if (modal?.type === 'client-edit' && modalLead) { const { client, site } = leadContext(state, modalLead); dialog = <Dialog title="Контакты и объект" onClose={closeModal}><ClientForm client={client} site={site} onClose={closeModal} onSubmit={(p) => { mutate('client.update', { ...p, id: client.id, siteId: site.id }); closeModal(); }} /></Dialog>; }
   if (modal?.type === 'activity') dialog = <Dialog title="Записать общение" onClose={closeModal}><ActivityForm state={state} siteId={modal.siteId} onClose={closeModal} onSubmit={(p) => { mutate('activity.create', p, 'Запись добавлена в историю'); closeModal(); }} /></Dialog>;
   if (modal?.type === 'order' && modalLead) dialog = <Dialog title="Передать заказ в производство" onClose={closeModal}><OrderForm state={state} onClose={closeModal} onSubmit={(p) => { mutate('order.create', { ...p, leadId: modal.id }, 'Созданы заказ и первое задание цеху'); closeModal(); }} /></Dialog>;
@@ -373,7 +397,7 @@ export function App({ runtime = { mode: 'demo' } }) {
       {page === 'overview' ? <Overview state={state} navigate={navigate} onLead={openLead} onTask={taskProps.onOpen} /> : null}
       {page === 'clients' ? <Clients state={state} search={search} onLead={openLead} onSite={openSite} onCreate={() => setModal({ type: 'lead-new' })} /> : null}
       {page === 'construction' ? <Construction state={state} search={search} selectedSiteId={selectedSite} onSelectSite={openSite} command={mutate} uploadPhoto={liveSession ? uploadConstructionPhoto : null} onCreateTask={(stage) => setModal({ type: 'task-new', title: stage.title, siteId: stage.siteId, constructionStageId: stage.id, crewId: stage.crewId, assigneeId: stage.assigneeId, dueAt: stage.plannedFinish ? `${stage.plannedFinish}T17:00` : undefined })} /> : null}
-      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canManageIntegrations && runtime.assignCommunication ? assignCommunication : undefined, ignoreCommunication: canManageIntegrations && runtime.ignoreCommunication ? ignoreCommunication : undefined, batchCommunications: canManageIntegrations && runtime.batchCommunications ? batchCommunications : undefined, updateCommunicationWorkflow: runtime.updateCommunicationWorkflow ? updateCommunicationWorkflow : undefined, saveCommunicationTemplates: canManageIntegrations ? runtime.saveCommunicationTemplates : undefined, saveCommunicationRules: canManageIntegrations ? runtime.saveCommunicationRules : undefined, createTelegramLink: canManageIntegrations ? runtime.createTelegramLink : undefined, createMaxLink: canManageIntegrations ? runtime.createMaxLink : undefined, checkMaxConnection: canManageIntegrations ? runtime.checkMaxConnection : undefined, mergeClients: runtime.mergeClients ? mergeClients : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onTask={(siteId, activity) => setModal({type:'task-new', siteId, title: activity?.subject || 'Ответить клиенту', description: activity ? `По письму: ${activity.text.slice(0, 500)}` : ''})} onLead={openLead} onNotifications={() => setModal({ type: 'notifications' })} /> : null}
+      {page === 'communications' ? <Communications state={state} search={search} command={mutate} runtime={{ ...runtime, sendCommunication: runtime.sendCommunication ? sendCommunication : undefined, syncMail: canManageIntegrations && runtime.syncMail ? syncMail : undefined, assignCommunication: canHandleUnassigned && runtime.assignCommunication ? assignCommunication : undefined, ignoreCommunication: canManageIntegrations && runtime.ignoreCommunication ? ignoreCommunication : undefined, batchCommunications: canManageIntegrations && runtime.batchCommunications ? batchCommunications : undefined, updateCommunicationWorkflow: runtime.updateCommunicationWorkflow ? updateCommunicationWorkflow : undefined, saveCommunicationTemplates: canManageIntegrations ? runtime.saveCommunicationTemplates : undefined, saveCommunicationRules: canManageIntegrations ? runtime.saveCommunicationRules : undefined, createTelegramLink: canManageIntegrations ? runtime.createTelegramLink : undefined, createMaxLink: canManageIntegrations ? runtime.createMaxLink : undefined, checkMaxConnection: canManageIntegrations ? runtime.checkMaxConnection : undefined, replyUnassigned: canHandleUnassigned ? replyUnassigned : undefined, mergeClients: runtime.mergeClients ? mergeClients : undefined }} notify={(text,error=false)=>setToast({text,error})} onCreate={(siteId) => setModal({ type: 'activity', siteId })} onTask={(siteId, activity) => setModal({type:'task-new', siteId, title: activity?.subject || 'Ответить клиенту', description: activity ? `По письму: ${activity.text.slice(0, 500)}` : ''})} onLead={openLead} onCreateLead={(group, messageId) => setModal({ type: "lead-new", sourceMessageId: messageId, sourceName: group?.sender || "", sourceChannel: group?.channel || "", sourceText: group?.latest?.text || "" })} onNotifications={() => setModal({ type: 'notifications' })} /> : null}
       {page === 'chat' ? <InternalChat runtime={runtime} employees={state.employees} requestedThreadId={chatThreadId} context={chatContext} onContextConsumed={() => setChatContext(null)} onSelectThread={(id) => { setChatThreadId(id); window.history.replaceState(null, '', `#chat/${id}`); }} onOpenContext={(type, id) => { if (type === 'task') setModal({ type: 'task', id }); else openLead(id); }} /> : null}
       {page === 'supplies' ? <Inventory state={state} command={mutate} search={search}/> : null}
       {page === 'files' ? <SharedFiles liveSession={liveSession} localAttachments={localState.attachments || []} /> : null}
