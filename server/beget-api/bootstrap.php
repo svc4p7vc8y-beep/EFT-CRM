@@ -48,6 +48,11 @@ function crm_db(): PDO {
 
 function crm_headers(): void {
     $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
+    $publicMax = (string)($_GET['action'] ?? '') === 'connectors.max.public' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET';
+    if ($publicMax && in_array($origin, ['https://eftsip.ru', 'https://www.eftsip.ru'], true)) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Vary: Origin');
+    }
     if ($origin !== '' && (in_array($origin, crm_config()['allowed_origins'] ?? [], true) || $origin === 'https://calc.eftsip.ru')) {
         header('Access-Control-Allow-Origin: ' . $origin);
         header('Access-Control-Allow-Credentials: true');

@@ -25,6 +25,13 @@ if ($action === 'health' && $method === 'GET') {
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
 }
 
+if ($action === 'connectors.max.public' && $method === 'GET') {
+    $config = crm_integration_config('max');
+    $username = (string)($config['bot_username'] ?? '');
+    $enabled = !empty($config['enabled']) && (string)($config['bot_token'] ?? '') !== '' && preg_match('/^[A-Za-z0-9_.-]{2,100}$/', $username);
+    crm_json(['ok' => true, 'enabled' => (bool)$enabled, 'url' => $enabled ? 'https://max.ru/' . rawurlencode($username) . '?start=eftsip-website' : null]);
+}
+
 if ($action === 'connectors.telegram.webhook' && $method === 'POST') {
     $config=crm_integration_config('telegram');
     $expected=(string)($config['webhook_secret']??'');
@@ -84,6 +91,11 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     if ($type === 'bot_started') {
         $token = (string)($update['payload'] ?? '');
         $chatId = (string)($update['chat_id'] ?? '');
+        if ($token === 'eftsip-website' && preg_match('/^-?\d{1,20}$/', $chatId)) {
+            try { crm_http_json('https://platform-api2.max.ru/messages?chat_id=' . rawurlencode($chatId), ['text' => 'Здравствуйте! Это ЭФТ. Напишите, что вы планируете построить, и оставьте телефон для связи. Мы ответим здесь.', 'notify' => true], ['Authorization: ' . $config['bot_token']]); }
+            catch (Throwable $error) { error_log('EFT CRM MAX site welcome failed: ' . $error->getMessage()); }
+            crm_json(['ok' => true]);
+        }
         $links = is_array($config['pending_links'] ?? null) ? $config['pending_links'] : [];
         $link = $links[$token] ?? null;
         if ($token !== '' && preg_match('/^-?\d{1,20}$/', $chatId) && is_array($link) && (int)($link['expires'] ?? 0) >= time()) {
@@ -132,7 +144,19 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $insert->execute([$eventId, $siteId === false ? null : $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
     if ($insert->rowCount()) {
         crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
-        if ($siteId !== false) try { crm_push_notify_site((string)$siteId, $eventId); crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
+        try {
+            $recipients = is_array($config['notification_user_ids'] ?? null) ? $config['notification_user_ids'] : [];
+            if ($recipients) {
+                $ids = array_values(array_unique(array_filter(array_map('intval', $recipients), static fn(int $id): bool => $id > 0)));
+                if ($ids) {
+                    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                    $users = crm_db()->prepare('SELECT id FROM crm_users WHERE active=1 AND id IN (' . $placeholders . ')');
+                    $users->execute($ids);
+                    foreach ($users->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId, 'message', 'Новое сообщение в MAX', mb_substr($sender . ': ' . $text, 0, 300), '#communications', 'max:' . $eventId);
+                }
+            } elseif ($siteId !== false) crm_push_notify_site((string)$siteId, $eventId);
+            crm_push_dispatch(50, $recipients ? 'max:' . $eventId : 'message:' . $eventId);
+        } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
     }
     crm_json(['ok' => true]);
 }
@@ -857,10 +881,35 @@ if ($action === 'connectors.max.configure' && $method === 'POST') {
         'enabled' => true, 'bot_token' => $token, 'bot_username' => $username,
         'site_chat_ids' => $sameBot && is_array($previous['site_chat_ids'] ?? null) ? $previous['site_chat_ids'] : [],
         'pending_links' => $sameBot && is_array($previous['pending_links'] ?? null) ? $previous['pending_links'] : [],
+        'notification_user_ids' => is_array($previous['notification_user_ids'] ?? null) ? $previous['notification_user_ids'] : [],
         'webhook_secret' => $secret,
     ]);
     crm_audit((int)$user['id'], 'connector.max.configure', 'integration', 'max', ['username' => $username]);
     crm_json(['ok' => true, 'username' => $username, 'connectors' => crm_connector_statuses()]);
+}
+
+if ($action === 'connectors.max.recipients' && $method === 'GET') {
+    crm_require_capability('integrations.manage');
+    $config = crm_integration_config('max');
+    $users = crm_db()->query('SELECT id, display_name, username FROM crm_users WHERE active=1 ORDER BY display_name')->fetchAll(PDO::FETCH_ASSOC);
+    crm_json(['ok' => true, 'users' => array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => (string)$row['display_name'], 'username' => (string)$row['username']], $users), 'selectedIds' => array_values(array_map('intval', (array)($config['notification_user_ids'] ?? [])))]);
+}
+
+if ($action === 'connectors.max.recipients' && $method === 'POST') {
+    crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf();
+    $input = crm_input(); $ids = $input['userIds'] ?? null;
+    if (!is_array($ids) || count($ids) > 50) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Можно выбрать до 50 участников CRM.'], 422);
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    if (count($ids) !== count(array_filter($ids, static fn(int $id): bool => $id > 0))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Некорректный участник CRM.'], 422);
+    if ($ids) {
+        $check = crm_db()->prepare('SELECT COUNT(*) FROM crm_users WHERE active=1 AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $check->execute($ids);
+        if ((int)$check->fetchColumn() !== count($ids)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Один из участников неактивен.'], 422);
+    }
+    $config = crm_integration_config('max'); $config['notification_user_ids'] = $ids;
+    crm_store_private_integration('max', $config);
+    crm_audit((int)$user['id'], 'connector.max.recipients', 'integration', 'max', ['userIds' => $ids]);
+    crm_json(['ok' => true, 'selectedIds' => $ids]);
 }
 
 if ($action === 'connectors.max.check' && $method === 'POST') {
