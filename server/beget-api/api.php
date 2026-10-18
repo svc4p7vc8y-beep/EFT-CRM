@@ -20,6 +20,40 @@ function crm_task_assignee_ids(array $task): array {
     return is_array($ids) && $ids ? array_values(array_unique(array_filter($ids, 'is_string'))) : (empty($task['assignee_id']) ? [] : [(string)$task['assignee_id']]);
 }
 
+function crm_max_image_attachment(array $attachment): array {
+    $fallback = ['kind' => 'max_image_unavailable', 'name' => 'Фото из MAX недоступно'];
+    $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
+    $url = (string)($payload['url'] ?? '');
+    $parts = parse_url($url);
+    $host = strtolower((string)($parts['host'] ?? ''));
+    if (($parts['scheme'] ?? '') !== 'https' || !$host || !(preg_match('/(^|\.)oneme\.ru$/', $host) || preg_match('/(^|\.)max\.ru$/', $host)) || !function_exists('curl_init')) return $fallback;
+    $directory = dirname(__DIR__) . '/uploads/communications';
+    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) return $fallback;
+    $temporary = tempnam($directory, 'max-');
+    if ($temporary === false) return $fallback;
+    $stream = fopen($temporary, 'wb');
+    if ($stream === false) { unlink($temporary); return $fallback; }
+    $size = 0;
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 15, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+        CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use ($stream, &$size): int {
+            $length = strlen($chunk);
+            if ($size + $length > 50 * 1024 * 1024) return 0;
+            $written = fwrite($stream, $chunk); $size += (int)$written; return (int)$written;
+        }]);
+    curl_exec($curl);
+    $status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    fclose($stream);
+    if ($status !== 200 || $size === 0) { unlink($temporary); return $fallback; }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
+    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    if (!isset($extensions[$mime]) || @getimagesize($temporary) === false) { unlink($temporary); return $fallback; }
+    $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+    if (!rename($temporary, $directory . '/' . $key)) { unlink($temporary); return $fallback; }
+    return ['key' => $key, 'name' => 'Фото из MAX.' . $extensions[$mime], 'mime' => $mime, 'size' => $size, 'url' => '/api/api.php?action=communications.file&key=' . rawurlencode($key)];
+}
+
 if ($action === 'health' && $method === 'GET') {
     crm_db()->query('SELECT 1');
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
@@ -135,13 +169,18 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $body = is_array($message['body'] ?? null) ? $message['body'] : [];
     $text = trim((string)($body['text'] ?? ''));
     $mid = (string)($body['mid'] ?? '');
-    if (!preg_match('/^-?\d{1,20}$/', $chatId) || $text === '' || $mid === '') crm_json(['ok' => true]);
+    $images = array_values(array_filter(is_array($body['attachments'] ?? null) ? $body['attachments'] : [], static fn($entry): bool => is_array($entry) && ($entry['type'] ?? '') === 'image'));
+    if (!preg_match('/^-?\d{1,20}$/', $chatId) || ($text === '' && !$images) || $mid === '') crm_json(['ok' => true]);
+    $existing = crm_db()->prepare("SELECT 1 FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");
+    $existing->execute([mb_substr($mid, 0, 255)]);
+    if ($existing->fetchColumn()) crm_json(['ok' => true]);
     $map = is_array($config['site_chat_ids'] ?? null) ? $config['site_chat_ids'] : [];
     $chatSites = is_array($config['chat_site_ids'] ?? null) ? $config['chat_site_ids'] : [];
     $siteId = $chatSites[$chatId] ?? array_search($chatId, $map, true);
     crm_schema_ensure_v30();
     $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
     $metadataItems = [['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'max_chat', 'id' => $chatId], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']];
+    foreach (array_slice($images, 0, 12) as $image) $metadataItems[] = crm_max_image_attachment($image);
     $target = (array)($config['chat_targets'][$chatId] ?? []);
     if (in_array($target['type'] ?? '', ['site', 'lead', 'order'], true) && (string)($target['id'] ?? '') !== '') $metadataItems[] = ['kind' => 'crm_link', 'entity' => $target['type'], 'id' => (string)$target['id']];
     $metadata = json_encode($metadataItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -149,7 +188,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $occurredAt = $timestamp > 0 ? (int)floor($timestamp / 1000) : time();
     $insert = crm_db()->prepare("INSERT IGNORE INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,NULL,'message','max','incoming',?,'',?,0,?,'delivered','',?,NULL,NULL)");
     $eventId = crm_uuid();
-    $insert->execute([$eventId, $siteId === false ? null : $siteId, mb_substr($mid, 0, 255), mb_substr($text, 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
+    $insert->execute([$eventId, $siteId === false ? null : $siteId, mb_substr($mid, 0, 255), mb_substr($text !== '' ? $text : 'Фото', 0, 20000), $metadata, date('Y-m-d H:i:s', $occurredAt)]);
     if ($insert->rowCount()) {
         crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         try {
@@ -1282,13 +1321,15 @@ if ($action === 'communications.send' && $method === 'POST') {
 if ($action === 'communications.file' && $method === 'GET') {
     $user = crm_user(); $key = (string)($_GET['key'] ?? '');
     if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx)$/',$key)) { http_response_code(404); exit; }
-    $statement = crm_db()->prepare('SELECT site_id,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
+    $statement = crm_db()->prepare('SELECT site_id,channel,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
     $row = $statement->fetch(); if (!$row) { http_response_code(404); exit; }
-    if (!$row['site_id'] && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
+    if (!$row['site_id'] && !crm_can($user,'integrations.manage') && !(($row['channel'] ?? '') === 'max' && crm_can_handle_unassigned($user, 'max'))) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
     if ($row['site_id'] && !crm_can($user,'clients.manage') && !crm_can($user,'clients.view') && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
     $attachments = json_decode((string)$row['attachments_json'],true); $attachment = null; foreach (is_array($attachments)?$attachments:[] as $item) if (($item['key']??'')===$key) $attachment=$item;
     if (!$attachment) { http_response_code(404); exit; } $path=dirname(__DIR__).'/uploads/communications/'.$key; if (!is_file($path)) { http_response_code(404); exit; }
-    header('Content-Type: '.(string)($attachment['mime']??'application/octet-stream')); header('Content-Length: '.filesize($path)); header("Content-Disposition: attachment; filename*=UTF-8''".rawurlencode((string)($attachment['name']??'file'))); header('X-Content-Type-Options: nosniff'); readfile($path); exit;
+    $mime = (string)($attachment['mime'] ?? 'application/octet-stream');
+    $inline = in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true);
+    header('Content-Type: '.$mime); header('Content-Length: '.filesize($path)); header("Content-Disposition: ".($inline ? 'inline' : 'attachment')."; filename*=UTF-8''".rawurlencode((string)($attachment['name']??'file'))); header('X-Content-Type-Options: nosniff'); readfile($path); exit;
 }
 
 if ($action === 'attendance.list' && $method === 'GET') {

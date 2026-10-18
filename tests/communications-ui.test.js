@@ -11,7 +11,7 @@ test('непривязанный MAX-диалог предлагает отве�
     const { Communications } = await vite.ssrLoadModule('/src/features/Communications.jsx');
     const { createDemoState } = await vite.ssrLoadModule('/src/app/model.js');
     const state = createDemoState();
-    state.activities.unshift({ ...state.activities.find((item) => item.channel === 'email' && !item.siteId), id: 'max-test', channel: 'max', type: 'message', direction: 'incoming', subject: '', text: 'Нужен расчёт дома', createdAt: new Date(Date.now() + 86400000).toISOString(), attachments: [{ kind: 'sender', name: 'Клиент MAX' }, { kind: 'max_chat', id: '12345' }] });
+    state.activities.unshift({ ...state.activities.find((item) => item.channel === 'email' && !item.siteId), id: 'max-test', channel: 'max', type: 'message', direction: 'incoming', subject: '', text: 'Фото', createdAt: new Date(Date.now() + 86400000).toISOString(), attachments: [{ kind: 'sender', name: 'Клиент MAX' }, { kind: 'max_chat', id: '12345' }, { key: 'm-12345678901234567890123456789012.jpg', name: 'Фото из MAX.jpg', mime: 'image/jpeg', url: '/api/api.php?action=communications.file&key=m-12345678901234567890123456789012.jpg' }] });
     const html = renderToStaticMarkup(React.createElement(Communications, {
       state, search: '', command: () => {}, notify: () => {}, onCreate: () => {}, onCreateLead: () => {}, onLead: () => {}, onNotifications: () => {},
       runtime: { mode: 'server', capabilities: ['*'], assignCommunication: async () => {}, replyUnassigned: async () => {} },
@@ -22,6 +22,8 @@ test('непривязанный MAX-диалог предлагает отве�
     assert.match(html, /optgroup label="Заказы"/);
     assert.match(html, /Ответить в MAX/);
     assert.match(html, /Ответить на сообщение/);
+    assert.match(html, /<img[^>]+alt="Фото из MAX.jpg"/);
+    assert.match(html, /Открыть изображение: Фото из MAX.jpg/);
   } finally {
     await vite.close();
     delete globalThis.localStorage;

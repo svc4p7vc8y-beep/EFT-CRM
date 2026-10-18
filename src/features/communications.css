@@ -41,5 +41,21 @@
 .unassigned-composer-row .button{display:inline-flex;align-items:center;gap:7px;width:auto;min-width:112px;padding:0 14px}
 .unassigned-composer>small{display:block;margin-top:7px;color:var(--muted);font-size:10px}
 .message-bubble>header button[aria-label="Ответить на сообщение"]{opacity:1;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#edf6f7;color:var(--teal)}
+.message-thread{gap:7px;padding:12px}
+.conversation-card{padding:9px 11px;gap:8px}
+.conversation-copy small{margin:1px 0 3px}
+.message-bubble{flex:0 0 auto;width:fit-content;max-width:min(76%,520px);padding:8px 10px}
+.message-bubble.internal{width:fit-content;max-width:min(88%,580px)}
+.message-bubble p{margin:2px 0 0;line-height:1.4}
+.message-bubble>header small{margin-bottom:2px}
+.message-sender{margin:2px 0;font-size:10px}
+.message-bubble footer{margin-top:4px;gap:7px}
+.message-files{margin-top:5px}
+.message-files .message-image{display:block;width:fit-content;max-width:100%;padding:0;overflow:hidden;background:transparent}
+.message-image img{display:block;width:auto;max-width:100%;max-height:280px;border-radius:4px;object-fit:contain}
+.message-media-error{display:block;margin-top:4px;color:#9d6045;font-size:10px}
+.mail-assignment{margin:5px 0 0}
+.communication-workflow{margin-top:6px;padding-top:5px}
+@media(max-width:560px){.message-bubble{width:fit-content;max-width:92%}.message-bubble.internal{max-width:96%}.message-image img{max-height:220px}.mail-assignment-details{flex:0 1 auto}}
 .message-link-label{display:inline-block;margin-top:7px;color:var(--teal);font-size:10px;font-weight:600}
 @media(max-width:560px){.unassigned-link-bar{padding:10px}.unassigned-link-bar>strong{width:100%}.unassigned-link-bar select{flex-basis:100%}.unassigned-link-bar .button{flex:1}.unassigned-composer-row{align-items:stretch;flex-direction:column}.unassigned-composer-row .button{width:100%;justify-content:center}}
