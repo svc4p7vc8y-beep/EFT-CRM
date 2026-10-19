@@ -1,6 +1,6 @@
 Options -Indexes
 
-<FilesMatch "^(config\.local\.php|mail\.local\.php|telegram\.local\.php|max\.local\.php|\.eft-(mail|telegram|max)-.*|config\.example\.php|schema\.sql|create-admin\.php|notifications_cron\.php)$">
+<FilesMatch "^(config\.local\.php|mail\.local\.php|telegram\.local\.php|max\.local\.php|avito\.local\.php|\.eft-(mail|telegram|max|avito)-.*|config\.example\.php|schema\.sql|create-admin\.php|notifications_cron\.php)$">
   Require all denied
 </FilesMatch>
 

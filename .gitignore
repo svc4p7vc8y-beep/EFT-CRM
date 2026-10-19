@@ -11,6 +11,7 @@ server/**/config.local.php
 server/**/mail.local.php
 server/**/telegram.local.php
 server/**/max.local.php
+server/**/avito.local.php
 docs/PRODUCT_PLAN.md
 docs/DELIVERY_PLAN.md
 docs/FIRST_RELEASE.md

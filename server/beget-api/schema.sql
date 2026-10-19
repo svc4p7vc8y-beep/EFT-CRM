@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS crm_communications (
   site_id CHAR(36) NULL,
   task_id CHAR(36) NULL,
   activity_type VARCHAR(32) NOT NULL DEFAULT 'note',
-  channel ENUM('note','call','email','telegram','whatsapp','max','system') NOT NULL,
+  channel ENUM('note','call','email','telegram','whatsapp','max','avito','system') NOT NULL,
   direction ENUM('internal','incoming','outgoing') NOT NULL DEFAULT 'internal',
   external_key VARCHAR(255) NOT NULL DEFAULT '',
   subject VARCHAR(500) NOT NULL DEFAULT '',

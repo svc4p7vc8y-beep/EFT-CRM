@@ -158,6 +158,8 @@ export function AuthRoot() {
     saveTelegramSettings: async (botToken) => await crmApi.saveTelegramSettings(botToken),
     createTelegramLink: async (siteId) => (await crmApi.createTelegramLink(siteId)).url,
     saveMaxSettings: async (botToken) => await crmApi.saveMaxSettings(botToken),
+    saveAvitoSettings: async (clientId, clientSecret, accountId) => await crmApi.saveAvitoSettings(clientId, clientSecret, accountId),
+    syncAvito: async () => { const result=await crmApi.syncAvito(); updateWorkspace(result.workspace); return result; },
     loadMaxRecipients: crmApi.loadMaxRecipients,
     saveMaxRecipients: crmApi.saveMaxRecipients,
     checkMaxConnection: async () => await crmApi.checkMaxConnection(),

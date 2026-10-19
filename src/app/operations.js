@@ -59,7 +59,7 @@ function linesFrom(state, lines) {
 export function applyOperation(state, action, payload) {
   if (action === 'communication.send') {
     if (!state.sites.some((site) => site.id === payload.siteId)) throw new Error('Выберите клиента и объект');
-    if (!['note','call','email','telegram','whatsapp','max'].includes(payload.channel)) throw new Error('Выберите канал общения');
+    if (!['note','call','email','telegram','whatsapp','max','avito'].includes(payload.channel)) throw new Error('Выберите канал общения');
     const body = required(payload.text, 'сообщение').slice(0, 20000);
     const type = payload.channel === 'call' ? 'call' : payload.channel === 'email' ? 'email' : payload.channel === 'note' ? 'note' : 'message';
     const internal = ['note','call'].includes(payload.channel);

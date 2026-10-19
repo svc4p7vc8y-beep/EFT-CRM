@@ -284,6 +284,8 @@ function crm_schema_ensure_v30(): void {
         if (!crm_column_exists($table, $column)) $db->exec("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
     }
     if ($backfillChatDelivery) $db->exec('UPDATE crm_chat_members SET last_delivered_id=last_read_id');
+    $channelColumn = $db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='crm_communications' AND COLUMN_NAME='channel'")->fetchColumn();
+    if (is_string($channelColumn) && !str_contains($channelColumn, "'avito'")) $db->exec("ALTER TABLE crm_communications MODIFY channel ENUM('note','call','email','telegram','whatsapp','max','avito','system') NOT NULL");
     foreach (['workspace_revision' => '0', 'workspace_initialized' => '0', 'inventory_revision' => '0', 'inventory_initialized' => '0'] as $key => $value) {
         $statement = $db->prepare('INSERT IGNORE INTO crm_settings (setting_key, setting_value) VALUES (?, ?)');
         $statement->execute([$key, $value]);
@@ -504,7 +506,7 @@ function crm_workspace_for_user(array $user): array {
     if (crm_can($user, 'clients.view') || crm_can($user, 'clients.manage')) {
         $maxAccess = crm_can_handle_unassigned($user, 'max');
         $taskIds = array_fill_keys(array_column($workspace['tasks'], 'id'), true);
-        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== '' || ($activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])) || ($maxAccess && $activity['channel'] === 'max' && $activity['siteId'] === '')));
+        $workspace['activities'] = array_values(array_filter($workspace['activities'], static fn(array $activity): bool => $activity['siteId'] !== '' || ($activity['taskId'] !== '' && isset($taskIds[$activity['taskId']])) || ($maxAccess && $activity['channel'] === 'max' && $activity['siteId'] === '') || (crm_can_handle_unassigned($user, 'avito') && $activity['channel'] === 'avito' && $activity['siteId'] === '')));
         return array_merge($workspace, ['unassignedMaxAccess' => $maxAccess]);
     }
     $tasks = $workspace['tasks'];
@@ -527,6 +529,7 @@ function crm_workspace_for_user(array $user): array {
 
 function crm_can_handle_unassigned(array $user, string $channel): bool {
     if (crm_can($user, 'integrations.manage')) return true;
+    if ($channel === 'avito') return crm_can($user, 'clients.manage');
     if ($channel !== 'max' || !crm_can($user, 'clients.manage')) return false;
     $config = crm_integration_config('max');
     return in_array((int)$user['id'], array_map('intval', (array)($config['notification_user_ids'] ?? [])), true);
@@ -698,7 +701,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $insertActivity = $db->prepare('INSERT INTO crm_communications (id, site_id, task_id, activity_type, channel, direction, external_key, subject, body, is_read, is_ignored, attachments_json, recipient_ids_json, delivery_status, delivery_error, occurred_at, author_id, author_employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($activities as $row) {
             $type = in_array($row['type'] ?? '', ['note','call','meeting','email','message','system'], true) ? $row['type'] : 'note';
-            $channel = in_array($row['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','system'], true) ? $row['channel'] : (in_array($type, ['note','call','email','system'], true) ? $type : 'note');
+            $channel = in_array($row['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','avito','system'], true) ? $row['channel'] : (in_array($type, ['note','call','email','system'], true) ? $type : 'note');
             $direction = in_array($row['direction'] ?? '', ['internal','incoming','outgoing'], true) ? $row['direction'] : 'internal';
             $author = crm_text($row['authorId'] ?? '', 36); if (!isset($employeeIds[$author])) $author = $user['employeeId'] && isset($employeeIds[$user['employeeId']]) ? (string)$user['employeeId'] : '';
             $activityId = crm_required_text($row['id'] ?? '', 'идентификатор записи', 36);
@@ -751,7 +754,7 @@ function crm_require_capability(string $capability): array {
 }
 
 function crm_store_private_integration(string $channel, array $settings): void {
-    if (!in_array($channel, ['mail', 'telegram', 'max'], true)) throw new InvalidArgumentException('Unsupported integration');
+    if (!in_array($channel, ['mail', 'telegram', 'max', 'avito'], true)) throw new InvalidArgumentException('Unsupported integration');
     $path = __DIR__ . '/' . $channel . '.local.php';
     $temporary = tempnam(__DIR__, '.eft-' . $channel . '-');
     if ($temporary === false) throw new RuntimeException('Не удалось подготовить настройки подключения.');
@@ -763,7 +766,7 @@ function crm_store_private_integration(string $channel, array $settings): void {
 }
 
 function crm_integration_config(string $channel): array {
-    if (in_array($channel, ['mail', 'telegram', 'max'], true)) {
+    if (in_array($channel, ['mail', 'telegram', 'max', 'avito'], true)) {
         $privateFile = __DIR__ . '/' . $channel . '.local.php';
         if (is_file($privateFile)) {
             $private = require $privateFile;
@@ -780,6 +783,7 @@ function crm_connector_statuses(): array {
         'telegram' => ['config' => 'telegram', 'name' => 'Telegram'],
         'whatsapp' => ['config' => 'whatsapp', 'name' => 'WhatsApp'],
         'max' => ['config' => 'max', 'name' => 'MAX'],
+        'avito' => ['config' => 'avito', 'name' => 'Авито'],
     ];
     $result = [];
     foreach ($definitions as $id => $definition) {
@@ -793,11 +797,13 @@ function crm_connector_statuses(): array {
             'telegram' => $enabled && (string)($config['bot_token'] ?? '') !== '',
             'whatsapp' => $enabled && (string)($config['access_token'] ?? '') !== '' && (string)($config['phone_number_id'] ?? '') !== '' && preg_match('/^v\d+\.\d+$/', (string)($config['api_version'] ?? '')),
             'max' => $enabled && (string)($config['bot_token'] ?? '') !== '',
+            'avito' => $enabled && (string)($config['client_id'] ?? '') !== '' && (string)($config['client_secret'] ?? '') !== '' && preg_match('/^\d{1,20}$/', (string)($config['account_id'] ?? '')),
         };
         $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : (in_array($id, ['telegram', 'max'], true) ? 'Бот' . ((string)($config['bot_username'] ?? '') !== '' ? ' @' . (string)$config['bot_username'] : '') . ' подключён' : 'Отправка настроена')) : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
         if ($id === 'max' && $ready) $detail = 'Токен сохранён · привязано диалогов: ' . count((array)($config['site_chat_ids'] ?? []));
+        if ($id === 'avito' && $ready) $detail = 'Профиль ' . $config['account_id'] . ' · привязано диалогов: ' . count((array)($config['chat_site_ids'] ?? []));
         $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail,
-            'linkedSiteIds' => in_array($id, ['telegram', 'max'], true) && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
+            'linkedSiteIds' => in_array($id, ['telegram', 'max', 'avito'], true) && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
     }
     return $result;
 }
@@ -832,7 +838,7 @@ function crm_http_multipart(string $url, array $payload): array {
     return is_array($data)?$data:[];
 }
 
-function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = [], string $maxChatId = ''): array {
+function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = [], string $maxChatId = '', string $avitoChatId = ''): array {
     if (in_array($channel, ['note','call'], true)) return ['status' => 'internal', 'externalKey' => ''];
     if ($channel === 'email') {
         $config = crm_integration_config('mail');
@@ -876,6 +882,16 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         if($chatId===''||!preg_match('/^-?\d+$/',$chatId)) throw new RuntimeException('Для объекта не указан MAX chat ID.');
         $last=[];foreach(mb_str_split($body,4000) as $part)$last=crm_http_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode($chatId),['text'=>$part,'notify'=>true],['Authorization: '.$token]);
         return ['status'=>'sent','externalKey'=>'max-'.(string)($last['message']['body']['mid']??'')];
+    }
+    if ($channel === 'avito') {
+        $config=crm_integration_config('avito');
+        if (empty($config['enabled'])) throw new RuntimeException('Сначала подключите Авито в настройках общения.');
+        $chatId=$avitoChatId!==''?$avitoChatId:(string)($config['site_chat_ids'][$siteId] ?? '');
+        if ($chatId==='') throw new RuntimeException('У объекта нет привязанного диалога Авито.');
+        if ($files) throw new RuntimeException('Пока можно отправлять в Авито только текст.');
+        $result=crm_avito_send($config,$chatId,$body);
+        $id=(string)($result['id'] ?? '');
+        return ['status'=>'sent','externalKey'=>$id!==''?'avito-'.$id:''];
     }
     return ['status' => 'saved', 'externalKey' => ''];
 }
