@@ -17,3 +17,7 @@
 @page{size:A4 landscape;margin:12mm}
 @media print{body{background:white!important}.sidebar,.workspace,.toast,.sidebar-backdrop{display:none!important}.app-shell{display:none!important}.dialog{position:absolute!important;inset:0!important;margin:0!important;width:100%!important;max-width:none!important;max-height:none!important;overflow:visible!important;border:0!important;padding:0!important;box-shadow:none!important}.dialog>header,.dialog-actions{display:none!important}.dialog::backdrop{background:transparent!important}.report-sheet{padding:0!important}.report-sheet .table-wrap{overflow:visible!important}.report-sheet table{width:100%;min-width:0!important;border-collapse:collapse;font-size:8px}.report-sheet td,.report-sheet th{padding:4px 3px!important;border:1px solid #bfcbd1!important;white-space:normal!important}.report-sheet thead{display:table-header-group}.report-sheet tr{break-inside:avoid}.report-brand img{print-color-adjust:exact}.report-signature{break-inside:avoid}}
 @media(max-width:760px){.report-fields{grid-template-columns:1fr}.print-form-grid{grid-template-columns:1fr}}
+.inventory-delete-picker { display:flex; justify-content:flex-end; margin:12px 0; }
+.inventory-delete-picker label { display:flex; align-items:center; gap:10px; color:var(--text-muted,#667); font-size:13px; }
+.inventory-delete-picker select { max-width:min(100%,270px); }
+.deletion-link { color:#b34235 !important; }

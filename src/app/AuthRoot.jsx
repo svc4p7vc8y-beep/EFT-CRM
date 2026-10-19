@@ -127,18 +127,20 @@ export function AuthRoot() {
     completeTask: crmApi.completeTask,
     checkTask: crmApi.checkTask,
     createTask: crmApi.createTask,
-    saveWorkspace: async (workspace, baseRevision, initialize = false) => {
-      const result = await crmApi.saveWorkspace(workspace, baseRevision, initialize);
+    saveWorkspace: async (workspace, baseRevision, initialize = false, deletionPassword = '') => {
+      const result = await crmApi.saveWorkspace(workspace, baseRevision, initialize, deletionPassword);
       updateWorkspace(result);
       return initialize ? refreshWorkspace() : result;
     },
     uploadConstructionPhoto: async (stageId, file) => { await crmApi.uploadConstructionPhoto(stageId, file); return refreshWorkspace(); },
-    saveInventory: async (inventory, baseRevision) => {
-      const result = await crmApi.saveInventory(inventory, baseRevision);
+    saveInventory: async (inventory, baseRevision, deletionPassword = '') => {
+      const result = await crmApi.saveInventory(inventory, baseRevision, deletionPassword);
       updateWorkspace(result);
       return result;
     },
     refreshWorkspace,
+    deletionStatus: crmApi.deletionStatus,
+    updateDeletionPassword: crmApi.updateDeletionPassword,
     saveEmployee: async (employee) => {
       const result = await crmApi.saveEmployee(employeeToApi(employee));
       let saved = result.employee;
@@ -170,7 +172,7 @@ export function AuthRoot() {
     saveCommunicationTemplates: async (templates) => (await crmApi.saveCommunicationTemplates(templates)).templates,
     loadCommunicationRules: async () => (await crmApi.communicationRules()).rules,
     saveCommunicationRules: async (rules) => (await crmApi.saveCommunicationRules(rules)).rules,
-    mergeClients: async (targetId, sourceId) => { const result=await crmApi.mergeClients(targetId,sourceId); updateWorkspace(result.workspace); return result; },
+    mergeClients: async (targetId, sourceId, deletionPassword) => { const result=await crmApi.mergeClients(targetId,sourceId,deletionPassword); updateWorkspace(result.workspace); return result; },
     sendCommunication: async (payload) => { const result = await crmApi.sendCommunication(payload); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     saveUser: async (user) => { const result = await crmApi.saveUser(user); replaceUser(result.user); return result.user; },
     unlockFinance: async (pin) => { await crmApi.unlockFinance(pin); await refreshWorkspace(); },

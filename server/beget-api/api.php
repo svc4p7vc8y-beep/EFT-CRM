@@ -571,7 +571,7 @@ if ($action === 'workspace.save' && $method === 'PUT') {
     $input = crm_input(8 * 1024 * 1024);
     $baseRevision = filter_var($input['baseRevision'] ?? null, FILTER_VALIDATE_INT);
     if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию данных. Обновите страницу.'], 422);
-    $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']));
+    $workspace = crm_workspace_save(is_array($input['workspace'] ?? null) ? $input['workspace'] : [], $user, $baseRevision, !empty($input['initialize']), (string)($input['deletionPassword'] ?? ''));
     crm_json(array_merge(['ok' => true], crm_workspace_for_user($user)));
 }
 
@@ -579,6 +579,7 @@ if ($action === 'clients.merge' && $method === 'POST') {
     crm_require_origin(); $user=crm_require_capability('clients.manage'); crm_csrf(); crm_schema_ensure_v30();
     $input=crm_input(); $targetId=crm_required_text($input['targetId']??'','основной клиент',36); $sourceId=crm_required_text($input['sourceId']??'','дубль клиента',36);
     if ($targetId===$sourceId) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Выберите разных клиентов.'],422);
+    crm_assert_deletion_password((string)($input['deletionPassword'] ?? ''));
     $db=crm_db(); $db->beginTransaction();
     try {
         $query=$db->prepare('SELECT id,display_name,email,phone,source,notes FROM crm_clients WHERE id IN (?,?) FOR UPDATE'); $query->execute([$targetId,$sourceId]);
@@ -609,8 +610,34 @@ if ($action === 'inventory.save' && $method === 'PUT') {
     $input = crm_input(8 * 1024 * 1024);
     $baseRevision = filter_var($input['baseRevision'] ?? null, FILTER_VALIDATE_INT);
     if ($baseRevision === false || $baseRevision < 0) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Не удалось определить версию склада. Обновите страницу.'], 422);
-    $inventory = crm_inventory_save(is_array($input['inventory'] ?? null) ? $input['inventory'] : [], $user, $baseRevision);
+    $inventory = crm_inventory_save(is_array($input['inventory'] ?? null) ? $input['inventory'] : [], $user, $baseRevision, (string)($input['deletionPassword'] ?? ''));
     crm_json(array_merge(['ok' => true], $inventory));
+}
+
+if ($action === 'deletion.status' && $method === 'GET') {
+    $user = crm_user();
+    if (!in_array((string)$user['role'], ['owner','admin'], true)) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Настройка доступна владельцу и администратору.'], 403);
+    crm_json(['ok'=>true,'configured'=>crm_deletion_configured()]);
+}
+
+if ($action === 'deletion.password.update' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf();
+    if (!in_array((string)$user['role'], ['owner','admin'], true)) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Настройка доступна владельцу и администратору.'], 403);
+    $input = crm_input(16384);
+    $next = (string)($input['newPassword'] ?? '');
+    if (mb_strlen($next) < 8 || strlen($next) > 72) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Пароль удаления должен содержать не меньше 8 символов и не больше 72 байт.'], 422);
+    if (crm_deletion_configured()) {
+        crm_assert_deletion_password((string)($input['currentPassword'] ?? ''));
+    } else {
+        $attempts = array_values(array_filter((array)($_SESSION['deletion_attempts'] ?? []), static fn($time): bool => is_int($time) && $time > time() - 900));
+        if (count($attempts) >= 5) crm_json(['ok'=>false,'code'=>'too_many_attempts','message'=>'Слишком много попыток. Повторите через 15 минут.'],429);
+        $query = crm_db()->prepare('SELECT password_hash FROM crm_users WHERE id = ?'); $query->execute([(int)$user['id']]);
+        if (!password_verify((string)($input['currentPassword'] ?? ''), (string)$query->fetchColumn())) { $attempts[]=time(); $_SESSION['deletion_attempts']=$attempts; crm_json(['ok'=>false,'code'=>'invalid_password','message'=>'Неверный пароль вашей учётной записи.'], 401); }
+        unset($_SESSION['deletion_attempts']);
+    }
+    crm_db()->prepare('INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)')->execute(['deletion_password_hash',password_hash($next,PASSWORD_DEFAULT),(int)$user['id']]);
+    crm_audit((int)$user['id'],'deletion.password.update','settings');
+    crm_json(['ok'=>true,'configured'=>true]);
 }
 
 if ($action === 'finance.unlock' && $method === 'POST') {

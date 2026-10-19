@@ -180,6 +180,36 @@ function crm_settings_ensure(): void {
     $ready = true;
 }
 
+function crm_deletion_configured(): bool {
+    crm_settings_ensure();
+    $query = crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key = ?');
+    $query->execute(['deletion_password_hash']);
+    return (bool)$query->fetchColumn();
+}
+
+function crm_assert_deletion_password(string $password): void {
+    $attempts = array_values(array_filter((array)($_SESSION['deletion_attempts'] ?? []), static fn($time): bool => is_int($time) && $time > time() - 900));
+    if (count($attempts) >= 5) crm_json(['ok'=>false,'code'=>'too_many_attempts','message'=>'Слишком много попыток. Повторите через 15 минут.'], 429);
+    $query = crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key = ?');
+    $query->execute(['deletion_password_hash']);
+    $hash = (string)$query->fetchColumn();
+    if ($hash === '') crm_json(['ok'=>false,'code'=>'deletion_not_configured','message'=>'Сначала задайте пароль удаления в настройках.'], 409);
+    if (!password_verify($password, $hash)) {
+        $attempts[] = time(); $_SESSION['deletion_attempts'] = $attempts;
+        crm_json(['ok'=>false,'code'=>'invalid_deletion_password','message'=>'Неверный пароль удаления.'], 401);
+    }
+    unset($_SESSION['deletion_attempts']);
+}
+
+function crm_guard_removed_rows(PDO $db, array $groups, string $password): void {
+    $removed = [];
+    foreach ($groups as $table => $rows) {
+        $submitted = array_fill_keys(array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $rows), true);
+        foreach ($db->query("SELECT id FROM {$table}")->fetchAll(PDO::FETCH_COLUMN) as $id) if (!isset($submitted[(string)$id])) $removed[] = $table . ':' . $id;
+    }
+    if ($removed) crm_assert_deletion_password($password);
+}
+
 function crm_column_exists(string $table, string $column): bool {
     $statement = crm_db()->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
     $statement->execute([$table, $column]);
@@ -401,7 +431,7 @@ function crm_public_inventory(): array {
     ];
 }
 
-function crm_inventory_save(array $inventory, array $user, int $baseRevision): array {
+function crm_inventory_save(array $inventory, array $user, int $baseRevision, string $deletionPassword = ''): array {
     crm_schema_ensure_v30();
     $db = crm_db();
     $materials = crm_workspace_rows($inventory['materials'] ?? null, 'материалы', 20000);
@@ -416,6 +446,7 @@ function crm_inventory_save(array $inventory, array $user, int $baseRevision): a
         $lock = $db->prepare("SELECT setting_key, setting_value FROM crm_settings WHERE setting_key IN ('inventory_revision','inventory_initialized') FOR UPDATE");
         $lock->execute(); $settings = $lock->fetchAll(PDO::FETCH_KEY_PAIR); $revision = (int)($settings['inventory_revision'] ?? 0);
         if ($revision !== $baseRevision) { $db->rollBack(); crm_json(['ok' => false, 'code' => 'inventory_conflict', 'message' => 'Склад уже изменил другой сотрудник. Данные обновлены; повторите действие.'], 409); }
+        crm_guard_removed_rows($db, ['crm_materials'=>$materials,'crm_suppliers'=>$suppliers,'crm_supply_needs'=>$needs,'crm_purchases'=>$purchases,'crm_stock_documents'=>$documents,'crm_tools'=>$tools,'crm_tool_events'=>$events], $deletionPassword);
         $db->exec('DELETE FROM crm_tool_events'); $db->exec('DELETE FROM crm_tools'); $db->exec('DELETE FROM crm_stock_documents');
         $db->exec('DELETE FROM crm_purchases'); $db->exec('DELETE FROM crm_supply_needs'); $db->exec('DELETE FROM crm_suppliers'); $db->exec('DELETE FROM crm_materials');
         $materialIds = []; $materialTracked = [];
@@ -514,7 +545,7 @@ function crm_workspace_rows(mixed $value, string $label, int $limit = 50000): ar
     return $value;
 }
 
-function crm_workspace_save(array $workspace, array $user, int $baseRevision, bool $initialize): array {
+function crm_workspace_save(array $workspace, array $user, int $baseRevision, bool $initialize, string $deletionPassword = ''): array {
     crm_schema_ensure_v30();
     $db = crm_db();
     $clients = crm_workspace_rows($workspace['clients'] ?? null, 'клиенты', 20000);
@@ -536,6 +567,7 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $db->rollBack();
             crm_json(['ok' => false, 'code' => 'workspace_conflict', 'message' => 'Данные уже изменил другой сотрудник. Рабочее пространство обновлено; повторите действие.'], 409);
         }
+        crm_guard_removed_rows($db, ['crm_clients'=>$clients,'crm_sites'=>$sites,'crm_leads'=>$leads,'crm_orders'=>$orders,'crm_tasks'=>$tasks,'crm_construction_stages'=>$constructionStages,'crm_logistics'=>$logistics], $deletionPassword);
         if (!crm_can($user, 'integrations.manage')) {
             $privateActivities = array_values(array_filter(crm_public_workspace()['activities'], static fn(array $activity): bool => $activity['siteId'] === ''));
             $activities = array_merge(array_values(array_filter($activities, static fn(array $activity): bool => (string)($activity['siteId'] ?? '') !== '')), $privateActivities);
@@ -565,6 +597,9 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $previousAnswers[$previousQuestion['task_id']] = (string)$previousQuestion['answer'];
         }
         $previousBriefs = $db->query('SELECT id, building_brief_json FROM crm_sites')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $submittedSiteIds = array_fill_keys(array_column($sites, 'id'), true);
+        $detachFile = $db->prepare('UPDATE crm_shared_files SET site_id=NULL WHERE site_id=?');
+        foreach (array_keys($previousBriefs) as $siteId) if (!isset($submittedSiteIds[$siteId])) $detachFile->execute([$siteId]);
         $previousActivityAuthors = $db->query('SELECT id, author_id FROM crm_communications')->fetchAll(PDO::FETCH_KEY_PAIR);
         $db->exec('DELETE FROM crm_communications');
         $db->exec('DELETE FROM crm_tasks');

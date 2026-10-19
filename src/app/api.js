@@ -101,10 +101,12 @@ export const crmApi = {
   completeTask: (taskId, text) => request('tasks.complete', { method: 'POST', body: { taskId, text } }),
   checkTask: (taskId, checkId = '', title = '') => request('tasks.check', { method: 'POST', body: { taskId, checkId, title } }),
   createTask: (task) => request('tasks.create', { method: 'POST', body: { task } }),
-  saveWorkspace: (workspace, baseRevision, initialize = false) => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize } }),
-  mergeClients: (targetId, sourceId) => request('clients.merge', { method: 'POST', body: { targetId, sourceId } }),
+  saveWorkspace: (workspace, baseRevision, initialize = false, deletionPassword = '') => request('workspace.save', { method: 'PUT', body: { workspace, baseRevision, initialize, deletionPassword } }),
+  mergeClients: (targetId, sourceId, deletionPassword) => request('clients.merge', { method: 'POST', body: { targetId, sourceId, deletionPassword } }),
   uploadConstructionPhoto: (stageId, file) => { const body = new FormData(); body.append('stageId', stageId); body.append('photo', file); return request('construction.photo', { method: 'POST', body }); },
-  saveInventory: (inventory, baseRevision) => request('inventory.save', { method: 'PUT', body: { inventory, baseRevision } }),
+  saveInventory: (inventory, baseRevision, deletionPassword = '') => request('inventory.save', { method: 'PUT', body: { inventory, baseRevision, deletionPassword } }),
+  deletionStatus: () => request('deletion.status'),
+  updateDeletionPassword: (currentPassword, newPassword) => request('deletion.password.update', { method: 'POST', body: { currentPassword, newPassword } }),
   saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
   uploadEmployeePhoto: (employeeId, file) => {
     const body = new FormData();
