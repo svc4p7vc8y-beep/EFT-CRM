@@ -567,11 +567,11 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             $db->rollBack();
             crm_json(['ok' => false, 'code' => 'workspace_conflict', 'message' => 'Данные уже изменил другой сотрудник. Рабочее пространство обновлено; повторите действие.'], 409);
         }
-        crm_guard_removed_rows($db, ['crm_clients'=>$clients,'crm_sites'=>$sites,'crm_leads'=>$leads,'crm_orders'=>$orders,'crm_tasks'=>$tasks,'crm_construction_stages'=>$constructionStages,'crm_logistics'=>$logistics], $deletionPassword);
         if (!crm_can($user, 'integrations.manage')) {
             $privateActivities = array_values(array_filter(crm_public_workspace()['activities'], static fn(array $activity): bool => $activity['siteId'] === ''));
             $activities = array_merge(array_values(array_filter($activities, static fn(array $activity): bool => (string)($activity['siteId'] ?? '') !== '')), $privateActivities);
         }
+        crm_guard_removed_rows($db, ['crm_clients'=>$clients,'crm_sites'=>$sites,'crm_leads'=>$leads,'crm_orders'=>$orders,'crm_tasks'=>$tasks,'crm_communications'=>$activities,'crm_construction_stages'=>$constructionStages,'crm_logistics'=>$logistics], $deletionPassword);
         if ($initialize && !$initialized && (int)$db->query('SELECT COUNT(*) FROM crm_employees')->fetchColumn() === 0) {
             $insertEmployee = $db->prepare('INSERT INTO crm_employees (id, full_name, role_name, department, phone, email, avatar_key, attendance_mode, active, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             foreach (crm_workspace_rows($workspace['employees'] ?? [], 'сотрудники', 5000) as $index => $person) {
