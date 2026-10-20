@@ -53,6 +53,15 @@ test('общая задача может быть без исполнителя 
   state=applyCommand(state,'task.update',{id:state.tasks[0].id,assigneeId:'manager-1'});
   assert.equal(state.tasks[0].assigneeId,'manager-1');
 });
+test('задача создаётся, когда у сотрудника загружена фотография', () => {
+  const state = createDemoState();
+  state.employees[0].avatar = '/uploads/employees/e-0123456789abcdef01234567.webp';
+  const next = applyCommand(state, 'task.create', { title: 'Сборка панелей', assigneeId: state.employees[0].id, dueAt: '', quantity: 1, completedQty: 0, unit: 'задача', priority: 'normal', status: 'planned' });
+  assert.equal(next.tasks[0].title, 'Сборка панелей');
+  assert.equal(next.tasks[0].assigneeId, state.employees[0].id);
+  next.employees[0].avatar = 'https://example.com/other.webp';
+  assert.throws(() => validateState(next), /Некорректный список сотрудников/);
+});
 test('несколько исполнителей сохраняются при изменении задачи', () => {
   let state = createDemoState();
   state = applyCommand(state, 'task.update', { id: 'task-1', assigneeIds: ['worker-1', 'worker-2'] });
