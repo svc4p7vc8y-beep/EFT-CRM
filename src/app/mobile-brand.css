@@ -31,26 +31,56 @@
     box-shadow: none;
     color: #fff;
   }
-  .topbar .release-badge, .topbar-clock { display: none; }
+  .topbar-clock { display: none; }
+  .topbar .release-badge {
+    display: inline-flex;
+    align-items: center;
+    order: 1;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 3px 6px;
+    border: 1px solid #8cc63f66;
+    border-radius: 5px;
+    background: #8cc63f1c;
+    color: #c0e78a;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
   .topbar .mobile-top-logo {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     justify-content: start;
     width: auto;
     height: 54px;
-    padding: 0 4px;
+    padding: 0 2px;
     background: transparent;
     border-radius: 0;
     overflow: visible;
   }
-  .mobile-top-logo img { display: none; }
-  .topbar .mobile-top-logo::after {
-    content: "ЭФТ";
-    color: var(--mobile-lime);
-    font-size: 27px;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: -.055em;
+  .topbar .mobile-logo-lockup {
+    position: relative;
+    display: block;
+    width: 80px;
+    height: 48px;
   }
+  .topbar .mobile-logo-roof {
+    position: absolute;
+    top: 1px;
+    left: 39px;
+    width: 44px;
+    height: 21px;
+  }
+  .topbar .mobile-logo-wordmark {
+    position: absolute;
+    bottom: 1px;
+    left: 0;
+    color: #fff;
+    font-size: 27px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -.085em;
+  }
+  .topbar .theme-switcher { margin-left: auto; }
   .topbar :is(.mobile-settings-toggle, .mobile-search-toggle, .notification-button, .profile-button) { color: #f4f8f2; }
   .topbar :is(.mobile-settings-toggle, .mobile-search-toggle, .notification-button):hover { background: #ffffff1c; }
   .topbar .theme-switcher > summary { color: #f4f8f2; background: #ffffff12; border-color: #ffffff35; }
@@ -254,6 +284,13 @@
   .client-workspace .client-header h1, .construction-page .construction-header h1 { color: #fff; font-size: 25px; line-height: 1.2; }
   .client-workspace .client-header p, .construction-page .construction-kicker { color: #d8e8d8; }
   .client-workspace .client-header .button, .construction-page .construction-header .button { border-color: #ffffff44; background: #ffffff16; color: #fff; }
+}
+
+@media (max-width: 350px) {
+  .topbar .mobile-logo-lockup { width: 69px; }
+  .topbar .mobile-logo-roof { left: 34px; width: 38px; }
+  .topbar .mobile-logo-wordmark { font-size: 24px; }
+  .topbar .release-badge { padding-inline: 4px; font-size: 9px; }
 }
 
 @media (max-width: 560px) {
