@@ -1421,7 +1421,7 @@ if ($action === 'communications.send' && $method === 'POST') {
 if ($action === 'communications.file' && $method === 'GET') {
     $user = crm_user(); $key = (string)($_GET['key'] ?? '');
     if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx)$/',$key)) { http_response_code(404); exit; }
-    $statement = crm_db()->prepare('SELECT site_id,channel,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%"key":"'.$key.'"%']);
+    $statement = crm_db()->prepare('SELECT site_id,channel,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%'.$key.'%']);
     $row = $statement->fetch(); if (!$row) { http_response_code(404); exit; }
     if (!$row['site_id'] && !crm_can($user,'integrations.manage') && !(($row['channel'] ?? '') === 'max' && crm_can_handle_unassigned($user, 'max'))) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
     if ($row['site_id'] && !crm_can($user,'clients.manage') && !crm_can($user,'clients.view') && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);
