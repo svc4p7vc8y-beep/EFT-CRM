@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 76;
+export const RELEASE = 77;
 export const taskAssigneeIds = (task) => Array.isArray(task?.assigneeIds) ? task.assigneeIds : task?.assigneeId ? [task.assigneeId] : [];
 export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;

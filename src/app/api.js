@@ -129,6 +129,7 @@ export const crmApi = {
   assignCommunication: (messageId, targetType, targetId) => request('communications.assign', { method: 'POST', body: { messageId, targetType, targetId } }),
   replyUnassigned: (messageId, text, subject = '') => request('communications.reply-unassigned', { method: 'POST', body: { messageId, text, subject } }),
   ignoreCommunication: (messageId, ignored) => request('communications.ignore', { method: 'POST', body: { messageId, ignored } }),
+  recoverMaxImages: (messageId) => request('communications.max.recover-images', { method: 'POST', body: { messageId } }),
   batchCommunications: (messageIds, operation, siteId = '') => request('communications.batch', { method: 'POST', body: { messageIds, operation, siteId } }),
   updateCommunicationWorkflow: (messageId, status, followUpAt = '') => request('communications.workflow', { method: 'POST', body: { messageId, status, followUpAt } }),
   communicationTemplates: () => request('communications.templates'),
