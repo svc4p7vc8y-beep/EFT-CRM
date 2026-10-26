@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/chat.php';
 require __DIR__ . '/avito.php';
+require __DIR__ . '/max_media.php';
 
 crm_headers();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
@@ -19,40 +20,6 @@ if (str_starts_with($action, 'chat.')) crm_chat_handle($action, $method);
 function crm_task_assignee_ids(array $task): array {
     $ids = json_decode((string)($task['assignee_ids_json'] ?? '[]'), true);
     return is_array($ids) && $ids ? array_values(array_unique(array_filter($ids, 'is_string'))) : (empty($task['assignee_id']) ? [] : [(string)$task['assignee_id']]);
-}
-
-function crm_max_image_attachment(array $attachment): array {
-    $fallback = ['kind' => 'max_image_unavailable', 'name' => 'Фото из MAX недоступно'];
-    $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
-    $url = (string)($payload['url'] ?? '');
-    $parts = parse_url($url);
-    $host = strtolower((string)($parts['host'] ?? ''));
-    if (($parts['scheme'] ?? '') !== 'https' || !$host || !(preg_match('/(^|\.)oneme\.ru$/', $host) || preg_match('/(^|\.)max\.ru$/', $host)) || !function_exists('curl_init')) return $fallback;
-    $directory = dirname(__DIR__) . '/uploads/communications';
-    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) return $fallback;
-    $temporary = tempnam($directory, 'max-');
-    if ($temporary === false) return $fallback;
-    $stream = fopen($temporary, 'wb');
-    if ($stream === false) { unlink($temporary); return $fallback; }
-    $size = 0;
-    $curl = curl_init($url);
-    curl_setopt_array($curl, [CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 15, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-        CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use ($stream, &$size): int {
-            $length = strlen($chunk);
-            if ($size + $length > 50 * 1024 * 1024) return 0;
-            $written = fwrite($stream, $chunk); $size += (int)$written; return (int)$written;
-        }]);
-    curl_exec($curl);
-    $status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
-    curl_close($curl);
-    fclose($stream);
-    if ($status !== 200 || $size === 0) { unlink($temporary); return $fallback; }
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
-    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-    if (!isset($extensions[$mime]) || @getimagesize($temporary) === false) { unlink($temporary); return $fallback; }
-    $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
-    if (!rename($temporary, $directory . '/' . $key)) { unlink($temporary); return $fallback; }
-    return ['key' => $key, 'name' => 'Фото из MAX.' . $extensions[$mime], 'mime' => $mime, 'size' => $size, 'url' => '/api/api.php?action=communications.file&key=' . rawurlencode($key)];
 }
 
 if ($action === 'health' && $method === 'GET') {
@@ -1254,40 +1221,14 @@ if ($action === 'communications.max.recover-images' && $method === 'POST') {
     $statement = crm_db()->prepare("SELECT id, external_key, attachments_json FROM crm_communications WHERE id=? AND channel='max' AND direction='incoming' LIMIT 1");
     $statement->execute([$messageId]); $row = $statement->fetch();
     if (!$row) crm_json(['ok'=>false,'code'=>'not_found','message'=>'Сообщение MAX не найдено.'],404);
-    $entries = json_decode((string)$row['attachments_json'], true);
-    if (!is_array($entries)) $entries = [];
-    $missing = count(array_filter($entries, static fn($entry): bool => is_array($entry) && ($entry['kind'] ?? '') === 'max_image_unavailable'));
-    if (!$missing) crm_json(['ok'=>true,'recovered'=>0,'remaining'=>0,'workspace'=>crm_workspace_for_user($user)]);
-    $chatId = '';
-    foreach ($entries as $entry) if (is_array($entry) && ($entry['kind'] ?? '') === 'max_chat') $chatId = (string)($entry['id'] ?? '');
-    if (!preg_match('/^-?\d{1,20}$/', $chatId)) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Не удалось определить чат MAX.'],422);
-    $config = crm_integration_config('max');
-    if (empty($config['bot_token'])) crm_json(['ok'=>false,'code'=>'connector_unavailable','message'=>'Бот MAX не подключён.'],422);
     try {
-        $message = crm_http_get_json('https://platform-api2.max.ru/messages/' . rawurlencode((string)$row['external_key']), ['Authorization: ' . $config['bot_token']]);
+        $result = crm_max_recover_images_for_row($row, crm_integration_config('max'));
     } catch (Throwable $error) {
-        crm_json(['ok'=>false,'code'=>'max_unavailable','message'=>'MAX пока не отдал исходное сообщение. Повторите позже.'],502);
+        error_log('EFT CRM MAX photo recovery failed: ' . $error->getMessage());
+        crm_json(['ok'=>false,'code'=>'max_unavailable','message'=>'MAX пока не отдал фото. Повторите позже.'],502);
     }
-    $body = is_array($message['body'] ?? null) ? $message['body'] : [];
-    if ((string)($body['mid'] ?? '') !== (string)$row['external_key'] || (string)($message['recipient']['chat_id'] ?? '') !== $chatId) crm_json(['ok'=>false,'code'=>'max_mismatch','message'=>'MAX вернул другое сообщение. Фото не изменены.'],502);
-    $images = array_values(array_filter(is_array($body['attachments'] ?? null) ? $body['attachments'] : [], static fn($entry): bool => is_array($entry) && ($entry['type'] ?? '') === 'image'));
-    $imageIndex = 0; $recovered = 0;
-    foreach ($entries as &$entry) {
-        if (!is_array($entry) || (!isset($entry['mime']) && ($entry['kind'] ?? '') !== 'max_image_unavailable')) continue;
-        $source = $images[$imageIndex++] ?? null;
-        if (($entry['kind'] ?? '') !== 'max_image_unavailable' || !$source) continue;
-        $replacement = crm_max_image_attachment($source);
-        if (($replacement['kind'] ?? '') === 'max_image_unavailable') continue;
-        $entry = $replacement; $recovered++;
-    }
-    unset($entry);
-    if ($recovered) {
-        $save = crm_db()->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?');
-        $save->execute([json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $messageId]);
-        crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
-        crm_audit((int)$user['id'],'communication.max.recover_images','communication',$messageId,['recovered'=>$recovered]);
-    }
-    crm_json(['ok'=>true,'recovered'=>$recovered,'remaining'=>$missing-$recovered,'workspace'=>crm_workspace_for_user($user)]);
+    if ($result['changed']) crm_audit((int)$user['id'],'communication.max.recover_images','communication',$messageId,['recovered'=>$result['recovered']]);
+    crm_json(['ok'=>true,'recovered'=>$result['recovered'],'remaining'=>$result['remaining'],'workspace'=>crm_workspace_for_user($user)]);
 }
 
 if ($action === 'communications.batch' && $method === 'POST') {

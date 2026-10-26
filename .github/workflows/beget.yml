@@ -42,7 +42,7 @@ jobs:
           mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications release/uploads/chat
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
-          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/avito.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/avito.php server/beget-api/max_media.php server/beget-api/max_media_rescue.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
           cp -R server/beget-api/vendor release/api/vendor
           cp server/beget-api/.htaccess.example release/api/.htaccess
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess
@@ -98,3 +98,12 @@ jobs:
             release/ "${BEGET_SSH_USER}@${BEGET_SSH_HOST}:${BEGET_DEPLOY_PATH%/}/"
       - name: Verify CRM API
         run: curl --fail --silent --show-error --max-time 30 https://crm.eftsip.ru/api/?action=health | grep -q 'eft-crm-api'
+      - name: Recover MAX photo files on Beget
+        env:
+          BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
+          BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
+          BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
+        run: |
+          ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
+            "php '${BEGET_DEPLOY_PATH%/}/api/max_media_rescue.php'"
