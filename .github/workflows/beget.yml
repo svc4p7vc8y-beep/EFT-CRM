@@ -104,6 +104,12 @@ jobs:
           BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
           BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
         run: |
-          ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
-            "php '${BEGET_DEPLOY_PATH%/}/api/max_media_rescue.php'"
+          for attempt in 1 2 3; do
+            if ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
+              "php8.2 '${BEGET_DEPLOY_PATH%/}/api/max_media_rescue.php'"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 15; fi
+          done
+          exit 1
