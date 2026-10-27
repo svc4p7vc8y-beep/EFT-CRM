@@ -815,7 +815,7 @@ function crm_http_json(string $url, array $payload, array $headers = []): array 
     $raw = curl_exec($curl); $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE); $error = curl_error($curl); curl_close($curl);
     if ($raw === false || $error !== '') throw new RuntimeException('Канал не ответил: ' . $error);
     $data = json_decode((string)$raw, true);
-    if ($status < 200 || $status >= 300) throw new RuntimeException((string)($data['error']['message'] ?? $data['description'] ?? 'Ошибка внешнего канала'));
+    if ($status < 200 || $status >= 300) throw new RuntimeException((string)($data['code'] ?? $data['error']['message'] ?? $data['description'] ?? 'Ошибка внешнего канала'));
     return is_array($data) ? $data : [];
 }
 
@@ -836,6 +836,65 @@ function crm_http_multipart(string $url, array $payload): array {
     $raw=curl_exec($curl);$status=(int)curl_getinfo($curl,CURLINFO_RESPONSE_CODE);$error=curl_error($curl);curl_close($curl);$data=json_decode((string)$raw,true);
     if($raw===false||$error!==''||$status<200||$status>=300){$message=(string)($data['description']??$error);throw new RuntimeException($message!==''?$message:'Ошибка отправки файла');}
     return is_array($data)?$data:[];
+}
+
+function crm_max_upload_attachment(string $token, array $file): array {
+    $image = str_starts_with((string)$file['mime'], 'image/');
+    $type = $image ? 'image' : 'file';
+    $upload = crm_http_json('https://platform-api2.max.ru/uploads?type=' . $type, [], ['Authorization: ' . $token]);
+    $url = (string)($upload['url'] ?? '');
+    $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+    if (!str_starts_with($url, 'https://') || !preg_match('/(?:^|\.)(?:oneme\.ru|okcdn\.ru)$/', $host)) throw new RuntimeException('MAX вернул некорректную ссылку для загрузки файла.');
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_HTTPHEADER => ['Authorization: ' . $token], CURLOPT_POSTFIELDS => ['data' => new CURLFile((string)$file['path'], (string)$file['mime'], (string)$file['name'])]]);
+    $raw = curl_exec($curl); $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE); $error = curl_error($curl); curl_close($curl);
+    if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException('MAX не принял файл: ' . ($error ?: (string)$status));
+    $result = json_decode((string)$raw, true);
+    $mediaToken = (string)($result['token'] ?? $upload['token'] ?? '');
+    if ($image && $mediaToken === '') foreach ((array)($result['photos'] ?? []) as $photo) if (is_array($photo) && (string)($photo['token'] ?? '') !== '') { $mediaToken = (string)$photo['token']; break; }
+    if ($mediaToken === '') throw new RuntimeException('MAX не вернул токен загруженного файла.');
+    return ['type' => $type, 'payload' => ['token' => $mediaToken]];
+}
+
+function crm_communication_store_uploads(?array $files): array {
+    $items = []; $dispatchFiles = [];
+    if (!is_array($files) || !is_array($files['name'] ?? null)) return [$items, $dispatchFiles];
+    if (count($files['name']) > 8) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'К сообщению можно приложить не больше 8 файлов.'], 422);
+    $allowed = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx'];
+    $total = 0; $directory = dirname(__DIR__) . '/uploads/communications';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Cannot create communication upload directory');
+    foreach ($files['name'] as $index => $originalName) {
+        if ((int)($files['error'][$index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Один из файлов не удалось загрузить.'], 422);
+        $size = (int)($files['size'][$index] ?? 0); $total += $size;
+        if ($size < 1 || $size > 10*1024*1024 || $total > 25*1024*1024) crm_json(['ok' => false, 'code' => 'payload_too_large', 'message' => 'Один файл — до 10 МБ, все вложения — до 25 МБ.'], 413);
+        $temporary = (string)($files['tmp_name'][$index] ?? '');
+        if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
+        if (!isset($allowed[$mime])) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены изображения, PDF, TXT, ZIP, DOCX и XLSX.'], 422);
+        $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $allowed[$mime];
+        if (!move_uploaded_file($temporary, $directory . '/' . $key)) throw new RuntimeException('Cannot store communication attachment');
+        $safeName = crm_text($originalName, 220); $storedPath = $directory . '/' . $key;
+        $items[] = ['key'=>$key,'name'=>$safeName,'mime'=>$mime,'size'=>$size,'url'=>'/api/api.php?action=communications.file&key='.rawurlencode($key)];
+        $dispatchFiles[] = ['path'=>$storedPath,'name'=>$safeName,'mime'=>$mime,'size'=>$size];
+    }
+    return [$items, $dispatchFiles];
+}
+
+function crm_max_send_message(string $token, string $chatId, string $body, array $files = []): array {
+    $url = 'https://platform-api2.max.ru/messages?chat_id=' . rawurlencode($chatId);
+    $last = [];
+    if ($body !== '') foreach (mb_str_split($body, 4000) as $part) $last = crm_http_json($url, ['text' => $part, 'notify' => true], ['Authorization: ' . $token]);
+    foreach ($files as $file) {
+        $attachment = crm_max_upload_attachment($token, $file);
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            try { $last = crm_http_json($url, ['attachments' => [$attachment], 'notify' => true], ['Authorization: ' . $token]); break; }
+            catch (RuntimeException $error) {
+                if ($attempt === 3 || !str_contains($error->getMessage(), 'attachment.not.ready')) throw $error;
+                usleep((int)(500000 * ($attempt + 1)));
+            }
+        }
+    }
+    return ['status' => 'sent', 'externalKey' => 'max-' . (string)($last['message']['body']['mid'] ?? '')];
 }
 
 function crm_dispatch_message(string $channel, string $siteId, string $recipientEmail, string $recipientPhone, string $subject, string $body, array $files = [], string $maxChatId = '', string $avitoChatId = ''): array {
@@ -864,11 +923,12 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         if (empty($config['enabled']) || $token === '') return ['status' => 'saved', 'externalKey' => ''];
         if ($chatId === '') throw new RuntimeException('Для объекта не указан Telegram chat ID.');
         if(!preg_match('/^\d+:[A-Za-z0-9_-]+$/',$token)) throw new RuntimeException('Некорректный токен Telegram.');
-        $result = crm_http_json('https://api.telegram.org/bot' . $token . '/sendMessage', ['chat_id' => $chatId, 'text' => $body]);
-        foreach($files as $file) crm_http_multipart('https://api.telegram.org/bot'.$token.'/sendDocument',['chat_id'=>$chatId,'document'=>new CURLFile((string)$file['path'],(string)$file['mime'],(string)$file['name'])]);
+        $result = $body !== '' ? crm_http_json('https://api.telegram.org/bot' . $token . '/sendMessage', ['chat_id' => $chatId, 'text' => $body]) : [];
+        foreach($files as $file) $result = crm_http_multipart('https://api.telegram.org/bot'.$token.'/sendDocument',['chat_id'=>$chatId,'document'=>new CURLFile((string)$file['path'],(string)$file['mime'],(string)$file['name'])]);
         return ['status' => 'sent', 'externalKey' => 'tg-' . (string)($result['result']['message_id'] ?? '')];
     }
     if ($channel === 'whatsapp') {
+        if ($files) throw new RuntimeException('Отправка файлов в WhatsApp пока не подключена.');
         $config = crm_integration_config('whatsapp'); $token = (string)($config['access_token'] ?? ''); $phoneId = (string)($config['phone_number_id'] ?? '');
         if (empty($config['enabled']) || $token === '' || $phoneId === '') return ['status' => 'saved', 'externalKey' => ''];
         $to = preg_replace('/\D+/', '', $recipientPhone); if ($to === '') throw new RuntimeException('У клиента не указан телефон для WhatsApp.');
@@ -880,8 +940,7 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=$maxChatId!==''?$maxChatId:(string)($map[$siteId]??'');
         if(empty($config['enabled'])||$token==='') return ['status'=>'saved','externalKey'=>''];
         if($chatId===''||!preg_match('/^-?\d+$/',$chatId)) throw new RuntimeException('Для объекта не указан MAX chat ID.');
-        $last=[];foreach(mb_str_split($body,4000) as $part)$last=crm_http_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode($chatId),['text'=>$part,'notify'=>true],['Authorization: '.$token]);
-        return ['status'=>'sent','externalKey'=>'max-'.(string)($last['message']['body']['mid']??'')];
+        return crm_max_send_message($token, $chatId, $body, $files);
     }
     if ($channel === 'avito') {
         $config=crm_integration_config('avito');

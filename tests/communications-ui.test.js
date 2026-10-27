@@ -24,6 +24,8 @@ test('непривязанный MAX-диалог предлагает отве�
     assert.match(html, /Ответить на сообщение/);
     assert.match(html, /<img[^>]+alt="Фото из MAX.jpg"/);
     assert.match(html, /Открыть изображение: Фото из MAX.jpg/);
+    assert.match(html, /aria-label="Прикрепить фото или файл"/);
+    assert.match(html, /aria-label="Открыть изображение: Фото из MAX.jpg"[^>]*><img/);
   } finally {
     await vite.close();
     delete globalThis.localStorage;

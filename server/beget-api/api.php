@@ -1151,9 +1151,10 @@ if ($action === 'communications.assign' && $method === 'POST') {
 
 if ($action === 'communications.reply-unassigned' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
-    $input = crm_input();
-    $messageId = crm_required_text($input['messageId'] ?? '', 'сообщение', 36);
-    $text = crm_required_text($input['text'] ?? '', 'ответ', 20000);
+    $messageId = crm_required_text($_POST['messageId'] ?? '', 'сообщение', 36);
+    $text = crm_text($_POST['text'] ?? '', 20000);
+    $uploadedFiles = $_FILES['files'] ?? null;
+    if ($text === '' && empty($uploadedFiles['name'][0])) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Введите ответ или прикрепите файл.'],422);
     $lookup = crm_db()->prepare("SELECT id, site_id, channel, direction, subject, attachments_json FROM crm_communications WHERE id=? AND site_id IS NULL AND channel IN ('email','max','avito') AND direction='incoming' AND is_ignored=0");
     $lookup->execute([$messageId]); $received = $lookup->fetch();
     if (!$received) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Диалог уже привязан, исключён или не найден. Обновите страницу.'], 422);
@@ -1165,7 +1166,9 @@ if ($action === 'communications.reply-unassigned' && $method === 'POST') {
         if (($entry['kind'] ?? '') === 'sender') $email = (string)($entry['email'] ?? '');
         if (($entry['kind'] ?? '') === $channel.'_chat') $chatId = (string)($entry['id'] ?? '');
     }
-    $subject = crm_text($input['subject'] ?? '', 500);
+    $subject = crm_text($_POST['subject'] ?? '', 500);
+    if ($channel === 'avito' && !empty($uploadedFiles['name'][0])) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'В Авито пока доступны только текстовые ответы.'],422);
+    [$items, $dispatchFiles] = crm_communication_store_uploads($uploadedFiles);
     if ($channel === 'email') {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'В письме нет адреса для ответа.'], 422);
         if ($subject === '') $subject = 'Re: ' . preg_replace('/^(Re:\s*)+/i', '', (string)$received['subject']);
@@ -1178,17 +1181,14 @@ if ($action === 'communications.reply-unassigned' && $method === 'POST') {
         if ($channel === 'max') {
             $token = (string)($config['bot_token'] ?? '');
             if ($token === '') throw new RuntimeException('MAX-бот не подключён.');
-            $last = [];
-            foreach (mb_str_split($text, 4000) as $part) $last = crm_http_json('https://platform-api2.max.ru/messages?chat_id=' . rawurlencode($chatId), ['text' => $part, 'notify' => true], ['Authorization: ' . $token]);
-            $mid = (string)($last['message']['body']['mid'] ?? '');
-            $delivery = ['status' => 'sent', 'externalKey' => $mid !== '' ? 'max-' . $mid : ''];
+            $delivery = crm_max_send_message($token, $chatId, $text, $dispatchFiles);
         } elseif ($channel === 'avito') {
             $sent=crm_avito_send($config,$chatId,$text);
             $sentId=(string)($sent['id'] ?? '');
             $delivery=['status'=>'sent','externalKey'=>$sentId!==''?'avito-'.$sentId:''];
-        } else $delivery = crm_dispatch_message('email', '', $email, '', $subject, $text);
+        } else $delivery = crm_dispatch_message('email', '', $email, '', $subject, $text, $dispatchFiles);
     } catch (Throwable $error) { $deliveryError = mb_substr($error->getMessage(), 0, 1000); }
-    $metadata = [['kind' => 'reply', 'messageId' => $messageId]];
+    $metadata = array_merge($items, [['kind' => 'reply', 'messageId' => $messageId]]);
     if (in_array($channel,['max','avito'],true)) $metadata[] = ['kind' => $channel.'_chat', 'id' => $chatId];
     else $metadata[] = ['kind' => 'recipient', 'email' => $email];
     $linked = crm_db()->prepare('SELECT site_id FROM crm_communications WHERE id=?'); $linked->execute([$messageId]);
@@ -1338,7 +1338,8 @@ if ($action === 'communications.send' && $method === 'POST') {
     $siteId = crm_required_text($_POST['siteId'] ?? '', 'объект', 36);
     $channel = in_array($_POST['channel'] ?? '', ['note','call','email','telegram','whatsapp','max','avito'], true) ? (string)$_POST['channel'] : '';
     if ($channel === '') crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Выберите канал общения.'], 422);
-    $body = crm_required_text($_POST['text'] ?? '', 'сообщение', 20000); $subject = crm_text($_POST['subject'] ?? '', 500); $replyTo = crm_text($_POST['replyTo'] ?? '', 36);
+    $body = crm_text($_POST['text'] ?? '', 20000); $subject = crm_text($_POST['subject'] ?? '', 500); $replyTo = crm_text($_POST['replyTo'] ?? '', 36);
+    if ($body === '' && empty($_FILES['files']['name'][0])) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Введите сообщение или прикрепите файл.'],422);
     if ($channel==='avito' && (mb_strlen($body)>1000 || !empty($_FILES['files']['name'][0]))) crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'В Авито можно отправить только текст до 1000 символов.'],422);
     $context = crm_db()->prepare('SELECT s.id, c.email, c.phone FROM crm_sites s JOIN crm_clients c ON c.id=s.client_id WHERE s.id=?'); $context->execute([$siteId]); $target = $context->fetch();
     if (!$target) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Клиент или объект не найден.'], 422);
@@ -1369,23 +1370,7 @@ if ($action === 'communications.send' && $method === 'POST') {
         foreach ((array)json_decode((string)$received['attachments_json'],true) as $entry) if (is_array($entry) && ($entry['kind'] ?? '')==='avito_chat') $replyAvitoChatId=(string)($entry['id'] ?? '');
         if ($replyAvitoChatId==='') crm_json(['ok'=>false,'code'=>'validation_failed','message'=>'Диалог Авито не найден.'],422);
     }
-    $files = $_FILES['files'] ?? null; $items = []; $dispatchFiles = [];
-    if (is_array($files) && is_array($files['name'] ?? null)) {
-        if (count($files['name']) > 8) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'К сообщению можно приложить не больше 8 файлов.'], 422);
-        $allowed = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx'];
-        $total = 0; $directory = dirname(__DIR__) . '/uploads/communications';
-        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) throw new RuntimeException('Cannot create communication upload directory');
-        foreach ($files['name'] as $index => $originalName) {
-            if ((int)($files['error'][$index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Один из файлов не удалось загрузить.'], 422);
-            $size = (int)($files['size'][$index] ?? 0); $total += $size; if ($size < 1 || $size > 10*1024*1024 || $total > 25*1024*1024) crm_json(['ok' => false, 'code' => 'payload_too_large', 'message' => 'Один файл — до 10 МБ, все вложения — до 25 МБ.'], 413);
-            $temporary = (string)($files['tmp_name'][$index] ?? ''); if (!is_uploaded_file($temporary)) crm_json(['ok' => false, 'code' => 'upload_failed', 'message' => 'Файл не прошёл проверку загрузки.'], 422);
-            $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary); if (!isset($allowed[$mime])) crm_json(['ok' => false, 'code' => 'invalid_file_type', 'message' => 'Разрешены изображения, PDF, TXT, ZIP, DOCX и XLSX.'], 422);
-            $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $allowed[$mime]; if (!move_uploaded_file($temporary, $directory . '/' . $key)) throw new RuntimeException('Cannot store communication attachment');
-            $safeName=crm_text($originalName,220);$storedPath=$directory.'/'.$key;
-            $items[] = ['key'=>$key,'name'=>$safeName,'mime'=>$mime,'size'=>$size,'url'=>'/api/api.php?action=communications.file&key='.rawurlencode($key)];
-            $dispatchFiles[]=['path'=>$storedPath,'name'=>$safeName,'mime'=>$mime,'size'=>$size];
-        }
-    }
+    [$items, $dispatchFiles] = crm_communication_store_uploads($_FILES['files'] ?? null);
     $id = crm_uuid(); $direction = in_array($channel, ['note','call'], true) ? 'internal' : 'outgoing'; $type = $channel === 'call' ? 'call' : ($channel === 'email' ? 'email' : ($channel === 'note' ? 'note' : 'message'));
     $delivery = ['status' => $direction === 'internal' ? 'internal' : 'saved', 'externalKey' => '']; $deliveryError = '';
     try { $delivery = crm_dispatch_message($channel, $siteId, $recipientEmail, (string)$target['phone'], $subject, $body, $dispatchFiles, $replyMaxChatId, $replyAvitoChatId); }

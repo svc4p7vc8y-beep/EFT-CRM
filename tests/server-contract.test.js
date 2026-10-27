@@ -54,7 +54,7 @@ test('сервер CRM использует отдельные таблицы и
   assert.match(bootstrap, /samesite' => 'Lax'/);
   assert.match(api, /communications\.send/);
   assert.match(api, /connectors\.status/);
-  assert.match(api, /25\*1024\*1024/);
+  assert.match(bootstrap, /25\*1024\*1024/);
   assert.match(bootstrap, /function crm_connector_statuses/);
   assert.match(bootstrap, /function crm_dispatch_message/);
   assert.match(schema, /delivery_status/);

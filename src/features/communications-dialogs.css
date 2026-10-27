@@ -60,6 +60,12 @@
 .message-composer .composer-row{grid-template-columns:136px minmax(0,1fr) 42px 44px;align-items:end}
 .message-composer textarea{max-height:94px;font-size:13px}
 .message-composer>small{font-size:10px}
+.unassigned-composer-row .attach-button{flex:none;width:42px;height:42px;padding:0;display:grid;place-items:center}
+.communication-photo-viewer{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:72px 18px 18px;background:#07121cdb}
+.communication-photo-viewer>img{max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 14px 55px #0008}
+.communication-photo-viewer-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;min-height:58px;padding:8px 16px;background:#101d28;color:#fff}
+.communication-photo-viewer-bar span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.communication-photo-viewer-bar a,.communication-photo-viewer-bar button{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:7px;background:#ffffff20;color:#fff;cursor:pointer}
 .quick-replies{gap:6px;margin-bottom:8px}
 .quick-replies button{padding:5px 9px;font-size:10px}
 .reply-preview{font-size:11px}
@@ -100,7 +106,7 @@
   .communications-page .message-composer .composer-row>select{grid-column:1/-1}
   .message-composer select{padding:5px;font-size:11px}
   .message-composer .button{width:40px}
-  .message-composer .attach-button{width:36px}
+  .message-composer .attach-button,.unassigned-composer-row .attach-button{width:42px;min-height:42px}
   .message-composer textarea{font-size:16px;min-height:42px}
   .quick-replies{margin-bottom:5px}
   .quick-replies button{font-size:10px}
@@ -109,3 +115,9 @@
 :root[data-theme="dark"] .communications-page :is(.communication-workspace,.conversation-column,.thread-header,.message-composer,.dialog-channel-bar,.dialog-list-controls,.conversation-card,.dialog-list-search){background:var(--dialog-surface);border-color:#33434f}
 :root[data-theme="dark"] .communications-page :is(.dialog-channel-bar button:hover,.dialog-channel-bar button.active,.dialog-filter-row>button:hover,.dialog-filter-row>button.active,.conversation-card:hover,.conversation-card.active){background:#203740}
 :root[data-theme="dark"] .communications-page .message-bubble.outgoing{background:#18383c}
+@media(max-width:560px){
+  .communications-page .unassigned-composer-row{display:grid;grid-template-columns:42px minmax(0,1fr);gap:7px}
+  .communications-page .unassigned-composer-row .voice-field-control{grid-column:1/-1}
+  .communications-page .unassigned-composer-row .attach-button{width:42px}
+  .communications-page .unassigned-composer-row .primary{width:100%}
+}

@@ -127,7 +127,11 @@ export const crmApi = {
   createMaxLink: (siteId) => request('connectors.max.link', { method: 'POST', body: { siteId } }),
   syncMail: () => request('communications.mail.sync', { method: 'POST', body: {} }),
   assignCommunication: (messageId, targetType, targetId) => request('communications.assign', { method: 'POST', body: { messageId, targetType, targetId } }),
-  replyUnassigned: (messageId, text, subject = '') => request('communications.reply-unassigned', { method: 'POST', body: { messageId, text, subject } }),
+  replyUnassigned: (messageId, text, subject = '', files = []) => {
+    const body = new FormData(); body.append('messageId', messageId); body.append('text', text); body.append('subject', subject);
+    files.forEach((file) => body.append('files[]', file));
+    return request('communications.reply-unassigned', { method: 'POST', body });
+  },
   ignoreCommunication: (messageId, ignored) => request('communications.ignore', { method: 'POST', body: { messageId, ignored } }),
   recoverMaxImages: (messageId) => request('communications.max.recover-images', { method: 'POST', body: { messageId } }),
   batchCommunications: (messageIds, operation, siteId = '') => request('communications.batch', { method: 'POST', body: { messageIds, operation, siteId } }),

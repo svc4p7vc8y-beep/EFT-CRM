@@ -307,8 +307,8 @@ export function App({ runtime = { mode: 'demo' } }) {
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
-  async function replyUnassigned(messageId, text, subject) {
-    const result = await runtime.replyUnassigned(messageId, text, subject);
+  async function replyUnassigned(messageId, text, subject, files) {
+    const result = await runtime.replyUnassigned(messageId, text, subject, files);
     if (result.workspace) { revisionRef.current = Number(result.workspace.workspaceRevision || revisionRef.current); setServerOverride(result.workspace); }
     return result;
   }
