@@ -23,7 +23,7 @@ import { Construction } from '../features/Construction.jsx';
 import { Logistics } from '../features/Logistics.jsx';
 import { SharedFiles } from '../features/SharedFiles.jsx';
 import { INVENTORY_ACTIONS, RELEASE } from './operations.js';
-import { employeeFromApi } from './api.js';
+import { crmApi, employeeFromApi } from './api.js';
 import '@fontsource/golos-text/cyrillic-400.css';
 import '@fontsource/golos-text/cyrillic-500.css';
 import '@fontsource/golos-text/cyrillic-600.css';
@@ -384,16 +384,34 @@ export function App({ runtime = { mode: 'demo' } }) {
   if (modal?.type === 'lead-new' || (modal?.type === 'lead-edit' && modalLead)) {
     const fromMessage = modal.type === 'lead-new' && Boolean(modal.sourceMessageId);
     const defaults = fromMessage ? { name: modal.sourceChannel === 'email' ? 'Новый клиент' : modal.sourceName, email: modal.sourceChannel === 'email' ? modal.sourceName : '', siteName: 'Запрос с сайта', source: modal.sourceChannel === 'max' ? 'MAX · сайт' : 'Почта · сайт', nextAction: 'Ответить на обращение', notes: modal.sourceText?.slice(0, 5000) || '' } : {};
-    dialog = <Dialog key={`${modal.type}-${modal.id || modal.sourceMessageId || ''}`} title={modal.type === 'lead-new' ? 'Новая заявка' : 'Изменить заявку'} onClose={closeModal} wide><LeadForm state={state} lead={modalLead} site={state.sites.find((site) => site.id === modalLead?.siteId)} defaults={defaults} onClose={closeModal} onSubmit={async (p) => {
+    dialog = <Dialog key={`${modal.type}-${modal.id || modal.sourceMessageId || ''}`} title={modal.type === 'lead-new' ? 'Новая заявка' : 'Изменить заявку'} onClose={closeModal} wide><LeadForm state={state} lead={modalLead} site={state.sites.find((site) => site.id === modalLead?.siteId)} defaults={defaults} onClose={closeModal} onSubmit={async (p, files = []) => {
       const next = mutate(modal.type === 'lead-new' ? 'lead.create' : 'lead.update', { ...p, id: modal?.id }, modal.type === 'lead-new' ? 'Заявка создана' : 'Заявка обновлена');
       if (modal.type === 'lead-new') {
         const leadId = next.leads[0].id;
-        if (fromMessage && liveSession) {
+        const siteId = next.leads[0].siteId;
+        if ((fromMessage || files.length) && liveSession) {
           await saveQueue.current;
           const fresh = await runtime.refreshWorkspace?.();
           if (!fresh?.leads?.some((item) => item.id === leadId)) throw new Error('Заявка не сохранилась на сервере. Проверьте подключение и повторите.');
+        }
+        if (fromMessage && liveSession) {
           try { await assignCommunication(modal.sourceMessageId, 'lead', leadId); }
           catch (error) { setToast({ text: `Заявка создана, но диалог не связан: ${error.message}`, error: true }); }
+        }
+        if (files.length) {
+          let uploaded = 0;
+          try {
+            for (const file of files) {
+              if (liveSession) await crmApi.filesUpload(file, siteId);
+              else {
+                if (file.size > 800000) throw new Error(`${file.name}: максимальный размер в демоверсии 800 КБ`);
+                const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error(`Не удалось прочитать ${file.name}`)); reader.readAsDataURL(file); });
+                mutate('attachment.add', { siteId, name: file.name, type: file.type, size: file.size, dataUrl });
+              }
+              uploaded++;
+            }
+            setToast({ text: `Заявка и вложения сохранены: ${uploaded}`, error: false });
+          } catch (error) { setToast({ text: `Заявка создана. Загружено файлов: ${uploaded} из ${files.length}. ${error.message}`, error: true }); }
         }
         openLead(leadId);
       }

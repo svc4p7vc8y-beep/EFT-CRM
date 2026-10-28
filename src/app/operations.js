@@ -1,6 +1,13 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 81;
+export const RELEASE = 82;
+export function nextToolInventoryNumber(tools) {
+  const used = new Set(tools.map((tool) => String(tool.serial || '').trim()));
+  const highest = [...used].reduce((max, serial) => /^\d+$/.test(serial) ? Math.max(max, Number(serial)) : max, 0);
+  let next = highest + 1;
+  while (used.has(String(next))) next++;
+  return String(next);
+}
 export const taskAssigneeIds = (task) => Array.isArray(task?.assigneeIds) ? task.assigneeIds : task?.assigneeId ? [task.assigneeId] : [];
 export const INVENTORY_ACTIONS = new Set(['material.save', 'supplier.save', 'need.save', 'purchase.create', 'stock.post', 'tool.save', 'tool.transfer']);
 export const PRICE_SOURCE = catalog.source;
@@ -125,7 +132,7 @@ export function applyOperation(state, action, payload) {
   } else if (action === 'tool.save') {
     const previous = state.tools.find((t) => t.id === payload.id);
     if (!['production', 'field'].includes(payload.home)) throw new Error('Выберите назначение инструмента');
-    const serial = required(payload.serial, 'инвентарный номер');
+    const serial = required(payload.serial || (!previous ? nextToolInventoryNumber(state.tools) : ''), 'инвентарный номер');
     if (state.tools.some((t) => t.id !== previous?.id && t.serial.toLowerCase() === serial.toLowerCase())) throw new Error('Инвентарный номер уже используется');
     const tool = { id: previous?.id || id(), name: required(payload.name, 'инструмент'), serial, home: payload.home, price: round(num(payload.price)), note: String(payload.note || '').slice(0, 2000), holderType: previous?.holderType || '', holderId: previous?.holderId || '', dueDate: previous?.dueDate || '' };
     if (previous) Object.assign(previous, tool); else state.tools.push(tool);

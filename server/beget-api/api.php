@@ -258,7 +258,7 @@ if ($action === 'files.upload' && $method === 'POST') {
     if (!is_array($file) || is_array($file['name'] ?? null) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)($file['tmp_name'] ?? ''))) crm_json(['ok' => false, 'message' => 'Выберите файл.'], 422);
     $name = mb_substr(basename((string)$file['name']), 0, 255);
     $extension = mb_strtolower(pathinfo($name, PATHINFO_EXTENSION));
-    if ($name === '' || !in_array($extension, ['pdf','jpg','jpeg','png','webp','gif','doc','docx','xls','xlsx','csv','txt','ppt','pptx','zip','rar','7z','dwg','dxf','json','eml'], true)) crm_json(['ok' => false, 'message' => 'Тип файла не поддерживается.'], 422);
+    if ($name === '' || !in_array($extension, ['pdf','jpg','jpeg','png','webp','gif','heic','heif','mp4','mov','webm','doc','docx','xls','xlsx','csv','txt','ppt','pptx','zip','rar','7z','dwg','dxf','json','eml'], true)) crm_json(['ok' => false, 'message' => 'Тип файла не поддерживается.'], 422);
     $size = (int)($file['size'] ?? 0);
     if ($size < 1 || $size > 8 * 1024 * 1024) crm_json(['ok' => false, 'message' => 'Размер файла не должен превышать 8 МБ.'], 413);
     $content = file_get_contents((string)$file['tmp_name']);
@@ -277,7 +277,9 @@ if ($action === 'files.download' && $method === 'GET') {
     $statement = crm_db()->prepare('SELECT original_name,mime_type,size_bytes,content FROM crm_shared_files WHERE id=?'); $statement->execute([$id]);
     $file = $statement->fetch(); if (!$file) crm_json(['ok' => false, 'message' => 'Файл не найден.'], 404);
     header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (int)$file['size_bytes']);
-    header("Content-Disposition: attachment; filename*=UTF-8''" . rawurlencode($file['original_name']));
+    $inline = ($_GET['inline'] ?? '') === '1' && in_array($file['mime_type'], ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true);
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Disposition: " . ($inline ? 'inline' : 'attachment') . "; filename*=UTF-8''" . rawurlencode($file['original_name']));
     header('Cache-Control: private, no-store'); echo $file['content']; exit;
 }
 

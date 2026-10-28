@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CalendarDays, CheckCircle2, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CheckCircle2, Download, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound, X } from 'lucide-react';
 import { Badge, Empty, VoiceInput } from '../components/UI.jsx';
 import { CallLink } from '../components/CallLink.jsx';
 import { LEAD_STAGES, dateLabel, employee, leadContext } from '../app/model.js';
@@ -7,6 +7,7 @@ import { briefReadiness, CALCULATOR_URL, downloadCalculatorBrief } from '../app/
 import { crmApi } from '../app/api.js';
 import '../components/building-brief.css';
 import './lead-discussion.css';
+import './communications-dialogs.css';
 
 const formatBytes = (bytes) => bytes < 1024 ? `${bytes} Б` : `${Math.round(bytes / 1024)} КБ`;
 
@@ -19,6 +20,7 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
   const [newAction, setNewAction] = useState('');
   const [uploading, setUploading] = useState(false);
   const [serverAttachments, setServerAttachments] = useState([]);
+  const [photoPreview, setPhotoPreview] = useState(null);
   const fileRef = useRef(null);
   const orders = useMemo(() => state.orders.filter((order) => order.siteId === site.id), [state.orders, site.id]);
   const orderIds = useMemo(() => new Set(orders.map((order) => order.id)), [orders]);
@@ -26,6 +28,7 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
   const events = useMemo(() => state.activities.filter((event) => event.siteId === site.id && !event.taskId).toSorted((a, b) => new Date(a.createdAt) - new Date(b.createdAt)), [state.activities, site.id]);
   const attachments = useMemo(() => state.attachments.filter((item) => item.siteId === site.id), [state.attachments, site.id]);
   useEffect(() => { if (!liveSession) return; let active = true; crmApi.filesList(site.id).then((result) => { if (active) setServerAttachments(result.files); }).catch((error) => notify(error.message, true)); return () => { active = false; }; }, [liveSession, site.id]);
+  useEffect(() => { if (!photoPreview) return undefined; const close = (event) => { if (event.key === 'Escape') setPhotoPreview(null); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [photoPreview]);
   const stageIndex = Math.max(0, LEAD_STAGES.findIndex((stage) => stage.id === lead.status));
   const progress = lead.status === 'lost' ? 0 : Math.round(((stageIndex + 1) / (LEAD_STAGES.length - 1)) * 100);
   const brief = site.buildingBrief || {};
@@ -118,9 +121,9 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
         </section>
 
         <section className="client-panel"><div className="client-section-title"><div><Paperclip size={19} /><h2>Файлы, фотографии и переписки</h2></div><button className="button" disabled={uploading} onClick={() => fileRef.current?.click()}><Upload size={15}/>{uploading ? 'Загрузка…' : 'Прикрепить'}</button></div>
-          <input ref={fileRef} className="sr-only" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.eml" onChange={uploadFiles}/>
+          <input ref={fileRef} className="sr-only" type="file" multiple accept="image/*,video/mp4,video/quicktime,video/webm,.pdf,.doc,.docx,.txt,.eml" onChange={uploadFiles}/>
           <p className="client-file-hint">{liveSession ? 'Файлы до 8 МБ сохраняются на сервере и видны в общем списке CRM и калькулятора.' : 'Файл до 800 КБ. В демонстрационной версии он хранится только в этом браузере.'}</p>
-          {(liveSession ? serverAttachments.length : attachments.length) ? <div className="attachment-grid">{liveSession ? serverAttachments.map((item) => <a className="attachment-card" href={crmApi.filesDownloadUrl(item.id)} download={item.name} key={item.id}>{item.mime?.startsWith('image/') ? <Image size={22}/> : <FileText size={22}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>) : attachments.map((item) => <a className="attachment-card" href={item.dataUrl} download={item.name} key={item.id}>{item.type.startsWith('image/') ? <Image size={22}/> : <FileText size={22}/>}<span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>)}</div> : <Empty title="Вложений пока нет">Добавьте фотографии объекта, документы или экспорт переписки.</Empty>}
+          {(liveSession ? serverAttachments.length : attachments.length) ? <div className="attachment-grid">{(liveSession ? serverAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size, createdAt: item.createdAt, type: item.mime, url: crmApi.filesPreviewUrl(item.id), downloadUrl: crmApi.filesDownloadUrl(item.id) })) : attachments.map((item) => ({ id: item.id, name: item.name, size: item.size, createdAt: item.createdAt, type: item.type, url: item.dataUrl, downloadUrl: item.dataUrl }))).map((item) => item.type?.startsWith('image/') ? <button type="button" className="attachment-card" key={item.id} onClick={() => setPhotoPreview(item)}><Image size={22}/><span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></button> : <a className="attachment-card" href={item.downloadUrl} download={item.name} key={item.id}><FileText size={22}/><span><strong>{item.name}</strong><small>{formatBytes(item.size)} · {dateLabel(item.createdAt)}</small></span></a>)}</div> : <Empty title="Вложений пока нет">Добавьте фотографии объекта, документы или экспорт переписки.</Empty>}
         </section>
       </div>
 
@@ -129,5 +132,6 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
         <section className="client-panel"><div className="client-section-title"><div><CheckCircle2 size={19}/><h2>Задачи и производство</h2></div><span>{tasks.length}</span></div>{tasks.length ? tasks.map((task) => <button className="client-task" key={task.id} onClick={() => onOpenTask(task.id)}><strong>{task.title}</strong><span>{employee(task.assigneeId, state)?.name || 'Не назначен'} · {dateLabel(task.dueAt)}</span><progress max="100" value={task.quantity ? task.completedQty / task.quantity * 100 : 0}/></button>) : <p className="muted small">Производственные задачи ещё не созданы.</p>}{orders.map((order) => <details className="order-spec" key={order.id}><summary>{order.number}</summary><p>{order.scope}</p></details>)}{!state.orders.some((order) => order.leadId === lead.id) ? <button className="button primary client-transfer" onClick={onTransfer}>Передать в производство</button> : null}</section>
       </aside>
     </div>
+    {photoPreview ? <div className="communication-photo-viewer" role="dialog" aria-modal="true" aria-label={`Просмотр изображения: ${photoPreview.name}`} onClick={() => setPhotoPreview(null)}><div className="communication-photo-viewer-bar" onClick={(event) => event.stopPropagation()}><span>{photoPreview.name}</span><a href={photoPreview.downloadUrl} download={photoPreview.name} aria-label="Скачать изображение"><Download size={20}/></a><button type="button" aria-label="Закрыть фотографию" onClick={() => setPhotoPreview(null)}><X size={24}/></button></div><img src={photoPreview.url} alt={photoPreview.name} onClick={(event) => event.stopPropagation()} /></div> : null}
   </section>;
 }

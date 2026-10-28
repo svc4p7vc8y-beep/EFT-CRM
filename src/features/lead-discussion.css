@@ -31,3 +31,4 @@
 .task-assignee-names>span{display:inline-flex!important;align-items:center;gap:5px!important;padding:4px 7px;border-radius:15px;background:#eef4f1}
 .task-assignee-names .avatar{width:23px;height:23px}
 @media(max-width:600px){.lead-chat-bubble{max-width:95%}.lead-checklist .inline-form{flex-wrap:wrap}.lead-checklist .inline-form .button{width:100%}.quick-communication.lead-chat-compose>.voice-field-control{grid-column:1/-1}.quick-communication.lead-chat-compose>.button{min-width:96px;padding-inline:10px}}
+.attachment-grid button.attachment-card{width:100%;background:transparent;text-align:left;cursor:pointer;font:inherit}

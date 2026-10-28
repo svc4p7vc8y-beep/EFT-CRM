@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCommand, createDemoState, validateState } from '../src/app/model.js';
-import { stockFor } from '../src/app/operations.js';
+import { nextToolInventoryNumber, stockFor } from '../src/app/operations.js';
 const prepare=()=>{let s=createDemoState();const m=s.materials[0];return applyCommand(s,'material.save',{...m,tracked:true});};
 const post=(s,kind,qty,price=0,extra={})=>applyCommand(s,'stock.post',{kind,date:'2026-09-23',target:'Учебный документ',updatePrice:true,lines:[{itemId:s.materials[0].id,quantity:qty,price}],...extra});
 test('приход обновляет прайс, расход списывается по средней цене, история неизменна',()=>{
@@ -29,6 +29,15 @@ test('выдача инструмента исключает двойную вы
   s=applyCommand(s,'tool.transfer',{id,kind:'issue',date:'2026-09-23',holderType:'employee',holderId:'worker-1'});
   assert.throws(()=>applyCommand(s,'tool.transfer',{id,kind:'issue',date:'2026-09-23',holderType:'employee',holderId:'worker-2'}),/уже выдан/);
   s=applyCommand(s,'tool.transfer',{id,kind:'return',date:'2026-09-24'});assert.equal(s.tools[0].holderId,'');assert.equal(s.toolEvents.length,2);assert.equal(s.toolEvents[1].holder,'Сотрудник 01');
+});
+test('новому инструменту назначается следующий инвентарный номер',()=>{
+  let s=createDemoState();
+  s=applyCommand(s,'tool.save',{name:'Первый',serial:'1',home:'production',price:0});
+  s=applyCommand(s,'tool.save',{name:'Второй',serial:'2',home:'field',price:0});
+  assert.equal(nextToolInventoryNumber(s.tools),'3');
+  s=applyCommand(s,'tool.save',{name:'Третий',home:'production',price:0});
+  assert.equal(s.tools.at(-1).serial,'3');
+  assert.throws(()=>applyCommand(s,'tool.save',{name:'Дубликат',serial:'3',home:'field',price:0}),/уже используется/);
 });
 test('табель обновляет отметку дня без двойного учёта часов',()=>{
   let s=applyCommand(createDemoState(),'attendance.save',{employeeId:'worker-1',date:'2026-09-23',kind:'work',hours:8});

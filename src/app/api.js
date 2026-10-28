@@ -74,6 +74,7 @@ export const crmApi = {
   filesList: (siteId = '') => request('files.list', { query: { siteId } }),
   filesUpload: (file, siteId = '') => { const body = new FormData(); body.append('file', file); if (siteId) body.append('siteId', siteId); return request('files.upload', { method: 'POST', body }); },
   filesDownloadUrl: (id) => actionUrl('files.download', { id }),
+  filesPreviewUrl: (id) => actionUrl('files.download', { id, inline: '1' }),
   session: (signal) => request('session', { signal }),
   login: (username, password) => request('login', { method: 'POST', body: { username, password } }),
   logout: () => request('logout', { method: 'POST', body: {} }),
