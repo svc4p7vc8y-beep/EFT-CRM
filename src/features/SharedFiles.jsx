@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileText, FolderOpen, RefreshCw, Upload } from 'lucide-react';
 import { crmApi } from '../app/api.js';
+import { openDocument } from '../components/DocumentViewer.jsx';
 import './shared-files.css';
 
 const CALC_API = 'https://eftsip.ru/api/api.php';
@@ -21,7 +22,7 @@ async function calculatorFiles() {
     const response = await fetch(`${CALC_API}?${query}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Не удалось получить файлы калькулятора');
     const data = await response.json();
-    for (const file of data.files || []) files.push({ id: `calc:${file.id}`, name: file.original_name, size: file.size_bytes, createdAt: file.created_at, source: 'Калькулятор', detail: folder.path || file.customer_name || 'Общая папка', href: `${CALC_API}?action=${file.downloadAction || 'file-download'}&id=${encodeURIComponent(file.id)}` });
+    for (const file of data.files || []) files.push({ id: `calc:${file.id}`, name: file.original_name, mime: file.mime_type, size: file.size_bytes, createdAt: file.created_at, source: 'Калькулятор', detail: folder.path || file.customer_name || 'Общая папка', href: `${CALC_API}?action=${file.downloadAction || 'file-download'}&id=${encodeURIComponent(file.id)}` });
     for (const child of data.folders || []) folders.push({ id: child.id, path: [folder.path, child.name].filter(Boolean).join(' / ') });
   }
   return { connected: true, files };
@@ -41,7 +42,7 @@ export function SharedFiles({ liveSession, localAttachments = [] }) {
     setLoading(true); setError('');
     try {
       const [crm, calc] = await Promise.allSettled([liveSession ? crmApi.filesList() : Promise.resolve({ files: [] }), calculatorFiles()]);
-      const crmFiles = crm.status === 'fulfilled' ? crm.value.files.map((file) => ({ id: `crm:${file.id}`, name: file.name, size: file.size, createdAt: file.createdAt, source: 'CRM', detail: file.siteName || 'Общие файлы', href: crmApi.filesDownloadUrl(file.id) })) : [];
+      const crmFiles = crm.status === 'fulfilled' ? crm.value.files.map((file) => ({ id: `crm:${file.id}`, sharedFileId: file.id, siteId: file.siteId, name: file.name, mime: file.mime, size: file.size, createdAt: file.createdAt, source: 'CRM', detail: file.siteName || 'Общие файлы', href: crmApi.filesPreviewUrl(file.id), downloadUrl: crmApi.filesDownloadUrl(file.id) })) : [];
       const calcFiles = calc.status === 'fulfilled' ? calc.value.files : [];
       setConnected(calc.status === 'fulfilled' && calc.value.connected);
       setItems([...crmFiles, ...calcFiles, ...oldFiles.map((file) => ({ id: `local:${file.id}`, name: file.name, size: file.size, createdAt: file.createdAt, source: 'CRM · этот браузер', detail: '', href: file.dataUrl, download: file.name }))].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
@@ -50,6 +51,7 @@ export function SharedFiles({ liveSession, localAttachments = [] }) {
     } finally { setLoading(false); }
   }, [liveSession, localAttachments, migrated]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { window.addEventListener('eft:files-changed', load); return () => window.removeEventListener('eft:files-changed', load); }, [load]);
   const upload = async (event) => {
     const files = [...(event.target.files || [])]; event.target.value = '';
     if (!files.length) return;
@@ -81,6 +83,6 @@ export function SharedFiles({ liveSession, localAttachments = [] }) {
     {liveSession && oldFiles.length ? <div className="shared-files-info"><FolderOpen size={20}/><span>{oldFiles.length} файлов сохранено только в этом браузере. Перенесите их на сервер, чтобы видеть в калькуляторе.</span><button className="button" disabled={uploading} onClick={migrateOldFiles}>Перенести</button></div> : null}
     {error ? <p className="shared-files-error" role="alert">{error}</p> : null}
     <input className="shared-files-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти файл, объект или папку" aria-label="Поиск файлов" />
-    <div className="shared-files-list">{visible.map((file) => <a key={file.id} href={file.href} download={file.download} target="_blank" rel="noreferrer" className="shared-file"><FileText size={20}/><span><strong>{file.name}</strong><small>{file.source} · {file.detail} · {sizeLabel(file.size)} · {dateLabel(file.createdAt)}</small></span><Download size={17}/></a>)}{!loading && !visible.length ? <p>Файлов пока нет.</p> : null}{loading ? <p>Загружаем файлы…</p> : null}</div>
+    <div className="shared-files-list">{visible.map((file) => <a key={file.id} href={file.href} className="shared-file" onClick={(event) => { event.preventDefault(); openDocument({ url: file.href, downloadUrl: file.downloadUrl || file.href, name: file.name, mime: file.mime, siteId: file.siteId, sharedFileId: file.sharedFileId }); }}><FileText size={20}/><span><strong>{file.name}</strong><small>{file.source} · {file.detail} · {sizeLabel(file.size)} · {dateLabel(file.createdAt)}</small></span><Download size={17}/></a>)}{!loading && !visible.length ? <p>Файлов пока нет.</p> : null}{loading ? <p>Загружаем файлы…</p> : null}</div>
   </section>;
 }

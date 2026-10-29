@@ -274,6 +274,25 @@ if ($action === 'files.upload' && $method === 'POST') {
     crm_json(['ok' => true, 'id' => $id], 201);
 }
 
+if ($action === 'files.move' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30();
+    if ($user['role'] === 'viewer') crm_json(['ok' => false, 'message' => 'Нет прав на перемещение файлов.'], 403);
+    $input = crm_input(2048);
+    $id = crm_text($input['id'] ?? '', 36);
+    $siteId = crm_text($input['siteId'] ?? '', 36);
+    if (!preg_match('/^[a-f0-9-]{36}$/i', $id)) crm_json(['ok' => false, 'message' => 'Файл не найден.'], 404);
+    if ($siteId !== '') {
+        if (!preg_match('/^[a-f0-9-]{36}$/i', $siteId)) crm_json(['ok' => false, 'message' => 'Объект не найден.'], 404);
+        $site = crm_db()->prepare('SELECT 1 FROM crm_sites WHERE id=?'); $site->execute([$siteId]);
+        if (!$site->fetchColumn()) crm_json(['ok' => false, 'message' => 'Объект не найден.'], 404);
+    }
+    $update = crm_db()->prepare('UPDATE crm_shared_files SET site_id=? WHERE id=?');
+    $update->execute([$siteId ?: null, $id]);
+    if (!$update->rowCount()) crm_json(['ok' => false, 'message' => 'Файл не найден или уже находится в этой папке.'], 404);
+    crm_audit((int)$user['id'], 'files.move', 'shared_file', $id, ['siteId' => $siteId]);
+    crm_json(['ok' => true, 'id' => $id, 'siteId' => $siteId]);
+}
+
 if ($action === 'files.download' && $method === 'GET') {
     crm_user(); crm_schema_ensure_v30();
     $id = (string)($_GET['id'] ?? '');

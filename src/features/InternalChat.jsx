@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, AudioLines, Bell, Check, CheckCheck, FileText, MessageCircle, Mic, Paperclip, Plus, Reply, Send, Square, Users, X } from 'lucide-react';
 import { Dialog, PageHeading, VoiceInput } from '../components/UI.jsx';
+import { openDocument } from '../components/DocumentViewer.jsx';
 import { demoChatApi } from './chatDemo.js';
 import './internal-chat.css';
 
@@ -26,12 +27,12 @@ function MessageAttachment({ file, fileUrl, onImageLoad }) {
   if (/^audio\/(webm|ogg|mp4|mpeg)$/.test(file.mime || '')) return <div className="chat-audio-attachment"><span><Mic size={14}/>Голосовое сообщение</span><audio controls preload="none" src={url}>Ваш браузер не поддерживает аудио.</audio></div>;
   if (preview) return <div className="chat-attachment chat-attachment-image">
     <div className="chat-attachment-image-head">
-      <a href={url} target="_blank" rel="noopener noreferrer" title="Открыть изображение в новой вкладке">{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</a>
+      <a href={url} onClick={(event) => { event.preventDefault(); openDocument({ ...file, url }); }} title="Открыть изображение">{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</a>
       <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>{expanded ? 'Свернуть' : 'Показать'}</button>
     </div>
-    {expanded ? <a className="chat-attachment-image-preview" href={url} target="_blank" rel="noopener noreferrer" aria-label={`Открыть ${file.name} в новой вкладке`}><img src={url} alt={file.name} loading="lazy" onLoad={onImageLoad} /></a> : null}
+    {expanded ? <a className="chat-attachment-image-preview" href={url} onClick={(event) => { event.preventDefault(); openDocument({ ...file, url }); }} aria-label={`Открыть ${file.name}`}><img src={url} alt={file.name} loading="lazy" onLoad={onImageLoad} /></a> : null}
   </div>;
-  return <a className="chat-attachment" href={url} target="_blank" rel="noopener noreferrer" download={file.name}>
+  return <a className="chat-attachment" href={url} onClick={(event) => { event.preventDefault(); openDocument({ ...file, url }); }}>
     <FileText size={22} />
     <span>{file.name}{file.size ? <small>{Math.max(1, Math.round(file.size / 1024))} КБ</small> : null}</span>
   </a>;
