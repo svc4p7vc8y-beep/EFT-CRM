@@ -31,7 +31,7 @@ function AssignmentTargetSelect({ state, value, onChange, label = 'Связат�
 const mailCountLabel = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? 'письмо' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 'письма' : 'писем'}`;
 const messageCountLabel = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? 'сообщение' : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 'сообщения' : 'сообщений'}`;
 
-export function Communications({ state, search, command, runtime = { mode: 'demo' }, notify, onCreate, onCreateLead, onTask, onLead, onNotifications }) {
+export function Communications({ state, search, command, runtime = { mode: 'demo' }, notify, onCreate, onCreateLead, onTask, onLead, onNotifications, focusMessageId = '' }) {
   const [channel, setChannel] = useState(''); const [mailFolder, setMailFolder] = useState('all'); const [unassignedOpen, setUnassignedOpen] = useState(true); const [sendChannel, setSendChannel] = useState('email'); const [selectedSite, setSelectedSite] = useState(''); const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
   const [recoveringImage, setRecoveringImage] = useState('');
   const [brokenImages, setBrokenImages] = useState([]);
@@ -74,7 +74,19 @@ export function Communications({ state, search, command, runtime = { mode: 'demo
   const inboxSelected = activeId.startsWith(UNASSIGNED); const activeGroup = unassignedGroups.find((row)=>row.id===activeId); const active = state.sites.find((item)=>item.id===activeId); const client = state.clients.find((item)=>item.id===active?.clientId); const lead = state.leads.find((item)=>item.siteId===activeId);
   const linkMessageId = activeGroup?.messages.find((item) => item.direction === 'incoming')?.id || '';
   const thread = useMemo(()=>inboxSelected ? [...(activeGroup?.messages || [])].reverse() : state.activities.filter((item)=>item.siteId===activeId&&(!channel||item.channel===channel)&&item.channel!=='system'&&!item.ignored&&(mailFolder==='all'||(mailFolder==='incoming'&&item.direction==='incoming')||(mailFolder==='outgoing'&&item.direction==='outgoing'))).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt)),[activeId,channel,mailFolder,inboxSelected,activeGroup,state.activities]);
-  useEffect(() => { if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight; }, [activeId, thread.length]);
+  useEffect(() => {
+    if (!focusMessageId) return;
+    const item = state.activities.find((row) => row.id === focusMessageId);
+    if (!item) return;
+    if (channel || mailFolder !== (item.ignored ? 'ignored' : 'all') || query || onlyUnread || attentionFilter !== 'all') {
+      setChannel(''); setMailFolder(item.ignored ? 'ignored' : 'all'); setQuery(''); setOnlyUnread(false); setAttentionFilter('all');
+      return;
+    }
+    if (item.siteId) setSelectedSite(item.siteId);
+    else { const group = unassignedGroups.find((row) => row.messages.some((message) => message.id === focusMessageId)); if (group) { setUnassignedOpen(true); setSelectedSite(group.id); } }
+    setMobileThreadOpen(true);
+  }, [focusMessageId, state.activities, channel, mailFolder, query, onlyUnread, attentionFilter, unassignedGroups]);
+  useEffect(() => { if (!threadRef.current) return; const entry = focusMessageId && [...threadRef.current.children].find((item) => item.dataset.notificationMessage === focusMessageId); if (entry) entry.scrollIntoView({ block: 'center' }); else threadRef.current.scrollTop = threadRef.current.scrollHeight; }, [activeId, thread.length, focusMessageId]);
   const activeConnector = connectors.find((item)=>item.id===sendChannel); const unreadTotal=state.activities.filter((item)=>!item.read&&!item.ignored).length;
   const replyCount = state.activities.filter((item)=>item.workflowStatus==='reply'&&!item.ignored).length;
   const overdueCount = state.activities.filter((item)=>item.followUpAt && item.followUpAt < today && item.workflowStatus!=='closed'&&!item.ignored).length;
@@ -155,7 +167,7 @@ export function Communications({ state, search, command, runtime = { mode: 'demo
           const status=STATUS[item.deliveryStatus]||STATUS.saved; const StatusIcon=status[1];
           const linked=item.attachments?.find((entry)=>entry?.kind==='crm_link');
           const linkName=linked?.entity==='order'?`Заказ ${state.orders.find((row)=>row.id===linked.id)?.number||''}`:linked?.entity==='lead'?'Заявка клиента':linked?.entity==='site'?'Клиент и объект':'';
-          return <article key={item.id} className={`message-bubble ${item.direction}`}>
+          return <article key={item.id} data-notification-message={item.id} className={`message-bubble ${item.direction} ${focusMessageId === item.id ? 'notification-focus' : ''}`}>
             <header>{inboxSelected && activeGroup?.channel === 'email' && runtime.batchCommunications?<input aria-label={`Выбрать сообщение ${item.subject||item.id}`} type="checkbox" checked={selectedMessages.includes(item.id)} onChange={(event)=>setSelectedMessages((current)=>event.target.checked?[...current,item.id]:current.filter((id)=>id!==item.id))}/>:null}<small>{channelName(item.channel)}{item.subject?` · ${item.subject}`:''}</small>{item.direction==='incoming' && (!inboxSelected || runtime.replyUnassigned)?<button type="button" title="Ответить" aria-label="Ответить на сообщение" onClick={()=>{setReplyTo(item);setSendChannel(['note','call'].includes(item.channel)?'email':item.channel);if(item.channel==='email')setSubject(item.subject?`Re: ${item.subject.replace(/^Re:\s*/i,'')}`:'Ответ ЭФТ');}}><Reply size={13}/></button>:null}</header>
             {correspondentOf(item)?<small className="message-sender">{item.direction==='outgoing'?'Кому':'От'}: {correspondentOf(item)}</small>:null}
             {item.text !== 'Фото' || !filesOf(item).some((file) => file.mime?.startsWith('image/')) ? <p>{item.text}</p> : null}

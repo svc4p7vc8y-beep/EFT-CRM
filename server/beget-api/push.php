@@ -58,8 +58,46 @@ function crm_push_emit_all(string $kind, string $title, string $body, string $ta
     }
 }
 
+function crm_push_details(string $title, string $targetPath, string $eventKey): array {
+    static $contexts = [];
+    $path = explode('?', $targetPath, 2)[0];
+    $context = '';
+    $contextKey = $path === '#communications' ? $path . ':' . $eventKey : $path;
+    if (!array_key_exists($contextKey, $contexts)) {
+        $row = null;
+        if (preg_match('~^#client/([A-Za-z0-9%_-]+)$~', $path, $match)) {
+            $query = crm_db()->prepare('SELECT c.display_name AS client_name, s.name AS site_name FROM crm_leads l JOIN crm_sites s ON s.id=l.site_id JOIN crm_clients c ON c.id=s.client_id WHERE l.id=?');
+            $query->execute([rawurldecode($match[1])]); $row = $query->fetch();
+        } elseif (preg_match('~^#task/([A-Za-z0-9_-]{1,36})$~', $path, $match)) {
+            $query = crm_db()->prepare('SELECT t.title AS task_name, c.display_name AS client_name, s.name AS site_name FROM crm_tasks t LEFT JOIN crm_sites s ON s.id=t.site_id LEFT JOIN crm_clients c ON c.id=s.client_id WHERE t.id=?');
+            $query->execute([$match[1]]); $row = $query->fetch();
+        } elseif ($path === '#communications' && preg_match('/^(?:message|max):([A-Za-z0-9_-]{1,36})$/', $eventKey, $match)) {
+            $query = crm_db()->prepare('SELECT c.display_name AS client_name, s.name AS site_name, a.subject AS task_name FROM crm_communications a LEFT JOIN crm_sites s ON s.id=a.site_id LEFT JOIN crm_clients c ON c.id=s.client_id WHERE a.id=?');
+            $query->execute([$match[1]]); $row = $query->fetch();
+        } elseif (preg_match('~^#chat/([A-Za-z0-9_-]{1,36})$~', $path, $match)) {
+            $query = crm_db()->prepare("SELECT c.display_name AS client_name, s.name AS site_name FROM crm_chat_threads h JOIN crm_tasks t ON h.thread_type='task' AND h.context_id=t.id LEFT JOIN crm_sites s ON s.id=t.site_id LEFT JOIN crm_clients c ON c.id=s.client_id WHERE h.id=?");
+            $query->execute([$match[1]]); $row = $query->fetch();
+        }
+        $parts = array_filter([(string)($row['client_name'] ?? ''), (string)($row['site_name'] ?? '')]);
+        $contexts[$contextKey] = $parts ? implode(' · ', $parts) : ($path === '#communications' && $row ? 'Без клиента' : (string)($row['task_name'] ?? ''));
+    }
+    $context = $contexts[$contextKey];
+    if ($context !== '' && !str_starts_with($title, $context . ' — ')) $title = $context . ' — ' . $title;
+    if (!str_contains($targetPath, '?')) {
+        $eventId = '';
+        $parameter = 'event';
+        if (preg_match('/^(?:lead-message|task-comment|activity:all|task-check):([A-Za-z0-9_-]{1,36})$/', $eventKey, $match)) $eventId = $match[1];
+        elseif (preg_match('/^task-complete:([A-Za-z0-9_-]{1,36})$/', $eventKey, $match)) $eventId = $match[1];
+        elseif (preg_match('/^answer:([A-Za-z0-9_-]{1,36}):[A-Fa-f0-9]+$/', $eventKey, $match)) $eventId = 'answer-' . $match[1];
+        elseif (preg_match('/^(?:message|max|chat):([A-Za-z0-9_-]{1,36})$/', $eventKey, $match)) { $eventId = $match[1]; $parameter = 'message'; }
+        if ($eventId !== '') $targetPath .= '?' . $parameter . '=' . $eventId;
+    }
+    return [$title, $targetPath];
+}
+
 function crm_push_emit(int $userId, string $kind, string $title, string $body, string $targetPath, string $eventKey): bool {
-    if (!in_array($kind, ['task', 'message', 'reminder'], true) || !preg_match('~^#(?:tasks|task/[A-Za-z0-9_-]{1,36}|communications|client/[A-Za-z0-9%_-]+|chat/[A-Za-z0-9_-]{1,36})$~', $targetPath)) return false;
+    if (!in_array($kind, ['task', 'message', 'reminder'], true) || !preg_match('~^#(?:tasks|task/[A-Za-z0-9_-]{1,36}|communications|client/[A-Za-z0-9%_-]+|chat/[A-Za-z0-9_-]{1,36})(?:\?(?:event|message)=[A-Za-z0-9_-]{1,64})?$~', $targetPath)) return false;
+    [$title, $targetPath] = crm_push_details($title, $targetPath, $eventKey);
     $statement = crm_db()->prepare('INSERT IGNORE INTO crm_notifications (user_id, kind, title, body, target_path, event_key) VALUES (?, ?, ?, ?, ?, ?)');
     $statement->execute([$userId, $kind, mb_substr($title, 0, 180), mb_substr($body, 0, 300), $targetPath, mb_substr($eventKey, 0, 190)]);
     return $statement->rowCount() === 1;
@@ -182,12 +220,13 @@ function crm_push_dispatch(int $limit = 12, ?string $eventKey = null): int {
 
 function crm_push_list(int $userId): array {
     crm_schema_ensure_v30();
-    $statement = crm_db()->prepare('SELECT id, kind, title, body, target_path, created_at, read_at FROM crm_notifications WHERE user_id=? ORDER BY id DESC LIMIT 60');
+    $statement = crm_db()->prepare('SELECT id, kind, title, body, target_path, event_key, created_at, read_at FROM crm_notifications WHERE user_id=? ORDER BY id DESC LIMIT 60');
     $statement->execute([$userId]);
-    $rows = array_map(static fn(array $row): array => [
-        'id' => (int)$row['id'], 'kind' => $row['kind'], 'title' => $row['title'], 'body' => $row['body'], 'target' => $row['target_path'],
-        'createdAt' => $row['created_at'], 'read' => $row['read_at'] !== null,
-    ], $statement->fetchAll());
+    $rows = array_map(static function(array $row): array {
+        [$title, $target] = crm_push_details((string)$row['title'], (string)$row['target_path'], (string)$row['event_key']);
+        return ['id' => (int)$row['id'], 'kind' => $row['kind'], 'title' => mb_substr($title, 0, 180), 'body' => $row['body'], 'target' => $target,
+            'createdAt' => $row['created_at'], 'read' => $row['read_at'] !== null];
+    }, $statement->fetchAll());
     $unread = crm_db()->prepare('SELECT COUNT(*) FROM crm_notifications WHERE user_id=? AND read_at IS NULL');
     $unread->execute([$userId]);
     $leadUnread = crm_db()->prepare("SELECT COUNT(*) FROM crm_notifications WHERE user_id=? AND kind='message' AND target_path LIKE '#client/%' AND read_at IS NULL");

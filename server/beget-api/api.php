@@ -544,7 +544,7 @@ if ($action === 'tasks.complete' && $method === 'POST') {
         $id = crm_uuid();
         $insert = $db->prepare("INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,?,'note','note','internal',?,'completion',?,1,'[]','internal','',NOW(),?,?)");
         $insert->execute([$id, $task['site_id'] ?: null, $taskId, $id, $result, (int)$user['id'], $user['employeeId'] ?: null]);
-        crm_push_emit_all('task', 'Задача завершена', $result, '#task/' . $taskId, 'task-complete:' . $taskId, (int)$user['id']);
+        crm_push_emit_all('task', 'Задача завершена', $result, '#task/' . $taskId, 'task-complete:' . $id, (int)$user['id']);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }

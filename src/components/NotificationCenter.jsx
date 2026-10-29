@@ -33,11 +33,12 @@ export function NotificationCenter({ runtime, late, blocked, onLead, onTask, onO
   }
 
   async function markRead(item) {
-    if (!item.read) {
-      const list = await runtime.readNotification(item.id);
-      setItems(list.items); setUnread(list.unread); onCount(list.unread, list.leadUnread);
-    }
-    onOpen(item.target);
+    try {
+      if (!item.read) {
+        const list = await runtime.readNotification(item.id);
+        setItems(list.items); setUnread(list.unread); onCount(list.unread, list.leadUnread);
+      }
+    } finally { onOpen(item.target); }
   }
 
   return <div className="notification-center">
