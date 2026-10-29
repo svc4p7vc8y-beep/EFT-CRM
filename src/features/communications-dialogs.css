@@ -10,7 +10,7 @@
 .communication-more>div,.dialog-filter-more>div,.dialog-thread-menu>div{position:absolute;top:calc(100% + 7px);right:0;z-index:12;display:grid;gap:2px;min-width:215px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--dialog-surface);box-shadow:0 16px 40px #1837462b}
 .communication-more>div button,.dialog-filter-more>div button,.dialog-thread-menu>div button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--dialog-ink);text-align:left;font-size:12px;white-space:nowrap}
 .communication-more>div button:hover,.dialog-filter-more>div button:hover,.dialog-thread-menu>div button:hover{background:var(--dialog-soft);color:var(--teal)}
-.communication-workspace{display:grid;grid-template-columns:minmax(300px,365px) minmax(0,1fr);grid-template-rows:54px minmax(0,1fr);height:calc(100dvh - 158px);min-height:570px;border-radius:12px;background:var(--dialog-surface);box-shadow:0 5px 22px #15364a0b}
+.communications-page .communication-workspace{display:grid;grid-template-columns:minmax(300px,365px) minmax(0,1fr);grid-template-rows:54px minmax(0,1fr);height:calc(100dvh - 158px);min-height:570px;border-radius:12px;background:var(--dialog-surface);box-shadow:0 5px 22px #15364a0b}
 .dialog-channel-bar{grid-column:1/-1;display:flex;align-items:stretch;gap:3px;min-width:0;padding:0 12px;border-bottom:1px solid var(--line);background:var(--dialog-surface);overflow-x:auto;scrollbar-width:thin}
 .dialog-channel-bar button{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;min-height:50px;padding:0 13px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--dialog-subtle);font-size:12px;font-weight:600;white-space:nowrap}
 .dialog-channel-bar button:hover,.dialog-channel-bar button.active{color:var(--teal);background:var(--dialog-soft)}
@@ -72,7 +72,7 @@
 .communication-duplicates{display:block}
 .communication-duplicates>summary{display:flex;align-items:center;gap:7px;cursor:pointer}
 .communication-duplicates>div{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-@media(max-width:1050px){.communication-workspace{grid-template-columns:minmax(275px,34%) minmax(0,1fr)}.dialog-channel-bar button{padding-inline:10px}.dialog-client-link{font-size:0;gap:0}.dialog-client-link svg{width:17px;height:17px}}
+@media(max-width:1050px){.communications-page .communication-workspace{grid-template-columns:minmax(275px,34%) minmax(0,1fr)}.dialog-channel-bar button{padding-inline:10px}.dialog-client-link{font-size:0;gap:0}.dialog-client-link svg{width:17px;height:17px}}
 @media(max-width:760px){
   .communications-page{padding-bottom:90px}
   .communications-page .page-heading{align-items:flex-start;gap:11px;margin-bottom:13px}
