@@ -40,10 +40,10 @@ function crm_push_key_valid(string $key, int $bytes): bool {
 }
 
 function crm_push_preferences(int $userId): array {
-    $statement = crm_db()->prepare('SELECT task_enabled, message_enabled, reminder_enabled FROM crm_notification_preferences WHERE user_id=?');
+    $statement = crm_db()->prepare('SELECT task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled FROM crm_notification_preferences WHERE user_id=?');
     $statement->execute([$userId]);
-    $row = $statement->fetch() ?: ['task_enabled' => 1, 'message_enabled' => 1, 'reminder_enabled' => 1];
-    return ['task' => (bool)$row['task_enabled'], 'message' => (bool)$row['message_enabled'], 'reminder' => (bool)$row['reminder_enabled']];
+    $row = $statement->fetch() ?: ['task_enabled' => 1, 'message_enabled' => 1, 'reminder_enabled' => 1, 'all_lead_messages_enabled' => 0];
+    return ['task' => (bool)$row['task_enabled'], 'message' => (bool)$row['message_enabled'], 'reminder' => (bool)$row['reminder_enabled'], 'allLeadMessages' => (bool)$row['all_lead_messages_enabled']];
 }
 
 function crm_push_emit(int $userId, string $kind, string $title, string $body, string $targetPath, string $eventKey): bool {
@@ -60,8 +60,39 @@ function crm_push_emit_for_employee(string $employeeId, string $kind, string $ti
     foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId, $kind, $title, $body, $targetPath, $eventKey);
 }
 
+function crm_push_notify_lead_activity(string $siteId, string $eventId, string $title, string $body, array $recipientIds = [], int $authorUserId = 0): void {
+    if ($siteId === '') return;
+    $lead = crm_db()->prepare('SELECT id, owner_employee_id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
+    $lead->execute([$siteId]);
+    $row = $lead->fetch();
+    if (!$row) return;
+    $target = '#client/' . rawurlencode((string)$row['id']);
+    $eventKey = 'lead-message:' . $eventId;
+    $ownerId = (string)($row['owner_employee_id'] ?? '');
+    if ($ownerId === '') {
+        $site = crm_db()->prepare('SELECT manager_employee_id FROM crm_sites WHERE id=?');
+        $site->execute([$siteId]);
+        $ownerId = (string)($site->fetchColumn() ?: '');
+    }
+    $employeeIds = array_values(array_unique(array_filter([...$recipientIds, $ownerId])));
+    if ($employeeIds) {
+        $placeholders = implode(',', array_fill(0, count($employeeIds), '?'));
+        $recipients = crm_db()->prepare("SELECT id FROM crm_users WHERE active=1 AND employee_id IN ($placeholders)");
+        $recipients->execute($employeeIds);
+        foreach ($recipients->fetchAll(PDO::FETCH_COLUMN) as $userId) if ((int)$userId !== $authorUserId) crm_push_emit((int)$userId, 'message', $title, $body, $target, $eventKey);
+    }
+    $all = crm_db()->query('SELECT u.id,u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND p.all_lead_messages_enabled=1');
+    foreach ($all->fetchAll() as $recipient) if ((int)$recipient['id'] !== $authorUserId && (crm_can($recipient, 'clients.view') || crm_can($recipient, 'clients.manage'))) crm_push_emit((int)$recipient['id'], 'message', $title, $body, $target, $eventKey);
+}
+
 function crm_push_notify_site(string $siteId, string $eventId): void {
     if ($siteId === '') return;
+    $lead = crm_db()->prepare('SELECT id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
+    $lead->execute([$siteId]);
+    if ($lead->fetchColumn()) {
+        crm_push_notify_lead_activity($siteId, $eventId, 'Новое сообщение клиента', 'Откройте заявку для ответа.');
+        return;
+    }
     $statement = crm_db()->prepare('SELECT manager_employee_id FROM crm_sites WHERE id=?');
     $statement->execute([$siteId]);
     $employeeId = (string)($statement->fetchColumn() ?: '');
@@ -146,5 +177,7 @@ function crm_push_list(int $userId): array {
     ], $statement->fetchAll());
     $unread = crm_db()->prepare('SELECT COUNT(*) FROM crm_notifications WHERE user_id=? AND read_at IS NULL');
     $unread->execute([$userId]);
-    return ['items' => $rows, 'unread' => (int)$unread->fetchColumn()];
+    $leadUnread = crm_db()->prepare("SELECT COUNT(*) FROM crm_notifications WHERE user_id=? AND kind='message' AND target_path LIKE '#client/%' AND read_at IS NULL");
+    $leadUnread->execute([$userId]);
+    return ['items' => $rows, 'unread' => (int)$unread->fetchColumn(), 'leadUnread' => (int)$leadUnread->fetchColumn()];
 }

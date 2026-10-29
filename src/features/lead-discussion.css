@@ -17,11 +17,18 @@
 .lead-chat-bubble p{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
 .lead-chat-bubble time{display:block;text-align:right;color:#7a8b83;font-size:10px}
 .lead-chat-empty{color:var(--muted);font-size:13px}
-.quick-communication.lead-chat-compose{grid-template-columns:minmax(0,1fr) auto;align-items:end;margin:12px 0 0}
+.quick-communication.lead-chat-compose{grid-template-columns:minmax(0,1fr) auto auto;align-items:end;margin:12px 0 0}
 .lead-chat-compose>select{grid-column:1/-1;max-width:230px}
 .lead-chat-compose>.voice-field-control{grid-column:1;min-width:0}
 .lead-chat-compose textarea{width:100%;min-height:88px}
-.quick-communication.lead-chat-compose>.button{grid-column:2;width:auto;min-width:112px;min-height:42px;padding:9px 14px;align-self:end}
+.quick-communication.lead-chat-compose>.button{width:auto;min-height:42px;padding:9px 14px;align-self:end}
+.quick-communication.lead-chat-compose>.lead-chat-attach{grid-column:2;min-width:78px}
+.quick-communication.lead-chat-compose>.button.primary{grid-column:3;min-width:112px}
+.lead-chat-image{display:block;width:min(100%,320px);max-height:240px;overflow:hidden;padding:0;margin:9px 0;border:0;border-radius:7px;background:#e7eee8;cursor:pointer}
+.lead-chat-image img{display:block;width:100%;max-height:240px;object-fit:contain}
+.lead-chat-file-link{display:flex;align-items:center;gap:7px;max-width:100%;margin:7px 0;color:var(--teal);font-size:12px;text-decoration:none}
+.lead-chat-file-link span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lead-chat-file-link small{white-space:nowrap;color:var(--muted)}
 .lead-recipients{position:relative;grid-column:1/-1;font-size:12px}
 .lead-recipients summary{cursor:pointer;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .lead-recipients>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px;max-height:175px;overflow:auto;padding:9px;background:#fff;border:1px solid var(--line);border-radius:6px}
@@ -30,5 +37,5 @@
 .task-assignee-names{display:flex!important;flex-wrap:wrap;gap:6px!important}
 .task-assignee-names>span{display:inline-flex!important;align-items:center;gap:5px!important;padding:4px 7px;border-radius:15px;background:#eef4f1}
 .task-assignee-names .avatar{width:23px;height:23px}
-@media(max-width:600px){.lead-chat-bubble{max-width:95%}.lead-checklist .inline-form{flex-wrap:wrap}.lead-checklist .inline-form .button{width:100%}.quick-communication.lead-chat-compose>.voice-field-control{grid-column:1/-1}.quick-communication.lead-chat-compose>.button{min-width:96px;padding-inline:10px}}
+@media(max-width:600px){.lead-chat-bubble{max-width:95%}.lead-checklist .inline-form{flex-wrap:wrap}.lead-checklist .inline-form .button{width:100%}.quick-communication.lead-chat-compose>.voice-field-control{grid-column:1/-1}.quick-communication.lead-chat-compose>.button{min-width:0;padding-inline:10px}.quick-communication.lead-chat-compose>.lead-chat-attach{grid-column:2}.quick-communication.lead-chat-compose>.button.primary{grid-column:3}}
 .attachment-grid button.attachment-card{width:100%;background:transparent;text-align:left;cursor:pointer;font:inherit}

@@ -267,6 +267,10 @@ if ($action === 'files.upload' && $method === 'POST') {
     $id = crm_uuid();
     crm_db()->prepare('INSERT INTO crm_shared_files (id,site_id,original_name,mime_type,size_bytes,content,created_by) VALUES (?,?,?,?,?,?,?)')->execute([$id,$siteId,$name,$mime,$size,$content,(int)$user['id']]);
     crm_audit((int)$user['id'], 'files.upload', 'shared_file', $id, ['siteId' => $siteId, 'name' => $name]);
+    if ($siteId) try {
+        crm_push_notify_lead_activity($siteId, $id, 'Новый файл по заявке', $name, [], (int)$user['id']);
+        crm_push_dispatch(4);
+    } catch (Throwable $error) { error_log('EFT CRM file notification failed: ' . $error->getMessage()); }
     crm_json(['ok' => true, 'id' => $id], 201);
 }
 
@@ -298,7 +302,7 @@ if ($action === 'logout' && $method === 'POST') {
 }
 
 if ($action === 'notifications.config' && $method === 'GET') {
-    $user = crm_user();
+    $user = crm_user(); crm_schema_ensure_v30();
     $keys = crm_push_keys();
     $count = crm_db()->prepare('SELECT COUNT(*) FROM crm_push_subscriptions WHERE user_id=? AND active=1');
     $count->execute([(int)$user['id']]);
@@ -337,8 +341,9 @@ if ($action === 'notifications.unsubscribe' && $method === 'POST') {
 
 if ($action === 'notifications.preferences' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30(); $input = crm_input(2048);
-    $prefs = [!empty($input['task']) ? 1 : 0, !empty($input['message']) ? 1 : 0, !empty($input['reminder']) ? 1 : 0];
-    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, task_enabled, message_enabled, reminder_enabled) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_enabled=VALUES(task_enabled), message_enabled=VALUES(message_enabled), reminder_enabled=VALUES(reminder_enabled)');
+    if (!empty($input['allLeadMessages']) && !crm_can($user, 'clients.view') && !crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'message' => 'Нет доступа к сообщениям всех заявок.'], 403);
+    $prefs = [!empty($input['task']) ? 1 : 0, !empty($input['message']) ? 1 : 0, !empty($input['reminder']) ? 1 : 0, !empty($input['allLeadMessages']) ? 1 : 0];
+    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_enabled=VALUES(task_enabled), message_enabled=VALUES(message_enabled), reminder_enabled=VALUES(reminder_enabled), all_lead_messages_enabled=VALUES(all_lead_messages_enabled)');
     $statement->execute([(int)$user['id'], ...$prefs]);
     crm_json(['ok' => true, 'preferences' => crm_push_preferences((int)$user['id'])]);
 }
@@ -349,6 +354,15 @@ if ($action === 'notifications.read' && $method === 'POST') {
     if ($id === false || $id < 1) crm_json(['ok' => false, 'message' => 'Уведомление не найдено.'], 422);
     $statement = crm_db()->prepare('UPDATE crm_notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=? AND user_id=?');
     $statement->execute([$id, (int)$user['id']]);
+    crm_json(array_merge(['ok' => true], crm_push_list((int)$user['id'])));
+}
+
+if ($action === 'notifications.read-lead' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30(); $input = crm_input(2048);
+    $leadId = (string)($input['leadId'] ?? '');
+    if (!preg_match('/^[A-Za-z0-9_-]{1,36}$/', $leadId)) crm_json(['ok' => false, 'message' => 'Заявка не найдена.'], 422);
+    $statement = crm_db()->prepare("UPDATE crm_notifications SET read_at=COALESCE(read_at,NOW()) WHERE user_id=? AND kind='message' AND target_path=? AND read_at IS NULL");
+    $statement->execute([(int)$user['id'], '#client/' . rawurlencode($leadId)]);
     crm_json(array_merge(['ok' => true], crm_push_list((int)$user['id'])));
 }
 

@@ -278,6 +278,9 @@ function crm_schema_ensure_v30(): void {
         'crm_chat_members' => [
             'last_delivered_id' => 'BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id',
         ],
+        'crm_notification_preferences' => [
+            'all_lead_messages_enabled' => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER message_enabled',
+        ],
     ];
     $backfillChatDelivery = !crm_column_exists('crm_chat_members', 'last_delivered_id');
     foreach ($columns as $table => $definitions) foreach ($definitions as $column => $definition) {
@@ -651,8 +654,6 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             if (count($leadChecklist) > 200 || array_filter($leadChecklist, static fn($item) => !is_array($item) || empty($item['id']) || !isset($item['title']) || !is_string($item['title']) || !is_bool($item['done'] ?? null))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте чек-лист заявки.'], 422);
             $insertLead->execute([$id, crm_required_text($row['siteId'] ?? '', 'объект заявки', 36), 'L-' . substr(hash('sha256', $id), 0, 16), $status, $owner ?: null, crm_text($row['nextAction'] ?? '', 250), crm_sql_datetime($row['dueAt'] ?? ''), crm_text($row['source'] ?? '', 120), crm_text($row['notes'] ?? '', 10000), json_encode($leadChecklist, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s')]);
         }
-        $leadBySite = [];
-        foreach ($leads as $leadRow) $leadBySite[(string)$leadRow['siteId']] = (string)$leadRow['id'];
         $insertOrder = $db->prepare('INSERT INTO crm_orders (id, public_number, site_id, lead_id, scope, reference_text, approved_by_employee_id, approved_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($orders as $row) {
             $approvedBy = crm_text($row['approvedBy'] ?? '', 36); if (!isset($employeeIds[$approvedBy])) $approvedBy = '';
@@ -711,9 +712,12 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             if (count($recipients) > 50 || array_filter($recipients, static fn($id) => !isset($employeeIds[$id]))) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Получатель сообщения не найден.'], 422);
             $delivery = in_array($row['deliveryStatus'] ?? '', ['internal','saved','queued','sent','delivered','error'], true) ? $row['deliveryStatus'] : ($direction === 'internal' ? 'internal' : 'saved');
             $insertActivity->execute([$activityId, crm_text($row['siteId'] ?? '', 36) ?: null, crm_text($row['taskId'] ?? '', 36) ?: null, $type, $channel, $direction, $externalKey, crm_text($row['subject'] ?? '', 500), crm_required_text($row['text'] ?? '', 'текст записи', 20000), empty($row['read']) ? 0 : 1, !empty($row['ignored']) ? 1 : 0, json_encode($attachments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), json_encode($recipients, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $delivery, crm_text($row['deliveryError'] ?? '', 1000), crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), ($previousActivityAuthors[$activityId] ?? 0) ?: (int)$user['id'], $author ?: null]);
-            if (!isset($previousActivityAuthors[$activityId]) && !$initialize && $type !== 'system' && $direction === 'internal') foreach ($recipients as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '')) {
-                $target = !empty($row['taskId']) ? '#task/' . $row['taskId'] : '#client/' . rawurlencode((string)($leadBySite[$row['siteId'] ?? ''] ?? ''));
-                if ($target !== '#client/') crm_push_emit_for_employee($recipientId, 'message', 'Новое сообщение по заявке', crm_text($row['text'] ?? '', 300), $target, 'activity:' . $activityId . ':' . $recipientId);
+            if (!isset($previousActivityAuthors[$activityId]) && !$initialize && $type !== 'system') {
+                if (empty($row['taskId']) && !empty($row['siteId'])) {
+                    crm_push_notify_lead_activity((string)$row['siteId'], $activityId, 'Новая запись по заявке', crm_text($row['text'] ?? '', 300), $recipients, (int)$user['id']);
+                } elseif ($direction === 'internal') foreach ($recipients as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '')) {
+                    crm_push_emit_for_employee($recipientId, 'message', 'Новый комментарий к задаче', crm_text($row['text'] ?? '', 300), '#task/' . $row['taskId'], 'activity:' . $activityId . ':' . $recipientId);
+                }
             }
         }
         $nextRevision = $revision + 1;

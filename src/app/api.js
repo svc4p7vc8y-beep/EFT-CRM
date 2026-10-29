@@ -85,6 +85,7 @@ export const crmApi = {
   unsubscribePush: (endpoint) => request('notifications.unsubscribe', { method: 'POST', body: { endpoint } }),
   saveNotificationPreferences: (preferences) => request('notifications.preferences', { method: 'POST', body: preferences }),
   readNotification: (id) => request('notifications.read', { method: 'POST', body: { id } }),
+  readLeadNotifications: (leadId) => request('notifications.read-lead', { method: 'POST', body: { leadId } }),
   testNotification: () => request('notifications.test', { method: 'POST', body: {} }),
   chatList: () => request('chat.list'),
   chatMessages: (threadId, before = '') => request('chat.messages', { query: { threadId, before } }),
