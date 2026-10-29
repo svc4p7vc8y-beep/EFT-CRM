@@ -348,6 +348,32 @@ if ($action === 'notifications.preferences' && $method === 'POST') {
     crm_json(['ok' => true, 'preferences' => crm_push_preferences((int)$user['id'])]);
 }
 
+if ($action === 'notifications.staff' && $method === 'GET') {
+    crm_require_capability('users.manage'); crm_schema_ensure_v30();
+    $rows = crm_db()->query('SELECT u.id, u.employee_id, u.role, u.active, COALESCE(p.all_lead_messages_enabled, 0) AS all_lead_messages_enabled FROM crm_users u LEFT JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.employee_id IS NOT NULL')->fetchAll();
+    crm_json(['ok' => true, 'staff' => array_map(static fn(array $row): array => [
+        'userId' => (int)$row['id'], 'employeeId' => $row['employee_id'], 'active' => (bool)$row['active'],
+        'eligible' => crm_can($row, 'clients.view') || crm_can($row, 'clients.manage'),
+        'allLeadMessages' => (bool)$row['all_lead_messages_enabled'],
+    ], $rows)]);
+}
+
+if ($action === 'notifications.staff' && $method === 'POST') {
+    crm_require_origin(); $actor = crm_require_capability('users.manage'); crm_csrf(); crm_schema_ensure_v30();
+    $input = crm_input(2048);
+    $employeeId = crm_text($input['employeeId'] ?? '', 36);
+    $enabled = !empty($input['allLeadMessages']);
+    $find = crm_db()->prepare('SELECT id, role, active FROM crm_users WHERE employee_id=? LIMIT 1');
+    $find->execute([$employeeId]);
+    $account = $find->fetch();
+    if (!$account) crm_json(['ok' => false, 'message' => 'У сотрудника нет учётной записи CRM.'], 404);
+    if ($enabled && (!(bool)$account['active'] || (!crm_can($account, 'clients.view') && !crm_can($account, 'clients.manage')))) crm_json(['ok' => false, 'message' => 'Для всех заявок нужна активная учётная запись с доступом к клиентам.'], 422);
+    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, all_lead_messages_enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE all_lead_messages_enabled=VALUES(all_lead_messages_enabled)');
+    $statement->execute([(int)$account['id'], $enabled ? 1 : 0]);
+    crm_audit((int)$actor['id'], 'notifications.staff.update', 'user', (string)$account['id'], ['allLeadMessages' => $enabled]);
+    crm_json(['ok' => true, 'employeeId' => $employeeId, 'allLeadMessages' => $enabled]);
+}
+
 if ($action === 'notifications.read' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); $input = crm_input(2048);
     $id = filter_var($input['id'] ?? null, FILTER_VALIDATE_INT);

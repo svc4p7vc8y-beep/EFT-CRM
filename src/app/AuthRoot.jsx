@@ -121,6 +121,7 @@ export function AuthRoot() {
     chatList: crmApi.chatList, chatMessages: crmApi.chatMessages, chatCreate: crmApi.chatCreate,
     chatSend: crmApi.chatSend, chatRead: crmApi.chatRead, chatFileUrl: crmApi.chatFileUrl,
     unsubscribePush: crmApi.unsubscribePush, saveNotificationPreferences: crmApi.saveNotificationPreferences,
+    staffNotifications: crmApi.staffNotifications, saveStaffNotification: crmApi.saveStaffNotification,
     readNotification: crmApi.readNotification, readLeadNotifications: crmApi.readLeadNotifications, testNotification: crmApi.testNotification,
     answerTask: crmApi.answerTask,
     commentTask: crmApi.commentTask,
