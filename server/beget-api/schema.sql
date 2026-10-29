@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   status ENUM('new','in_progress','calculation','offer','approval','contract','won','lost') NOT NULL DEFAULT 'new',
   owner_id BIGINT UNSIGNED NULL,
   owner_employee_id CHAR(36) NULL,
+  owner_employee_ids_json JSON NULL,
   next_action VARCHAR(250) NOT NULL DEFAULT '',
   next_action_at DATETIME NULL,
   source VARCHAR(120) NOT NULL DEFAULT '',

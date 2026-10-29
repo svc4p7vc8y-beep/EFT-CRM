@@ -141,6 +141,8 @@ export function AuthRoot() {
     },
     refreshWorkspace,
     deletionStatus: crmApi.deletionStatus,
+    deletionAccess: crmApi.deletionAccess,
+    deletionUnlock: crmApi.deletionUnlock,
     updateDeletionPassword: crmApi.updateDeletionPassword,
     saveEmployee: async (employee) => {
       const result = await crmApi.saveEmployee(employeeToApi(employee));

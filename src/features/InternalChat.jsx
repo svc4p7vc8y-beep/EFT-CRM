@@ -110,8 +110,9 @@ export function InternalChat({ runtime, employees, requestedThreadId = '', conte
   useEffect(() => { if (requestedThreadId) { setSelectedId(requestedThreadId); setMobileThread(true); } }, [requestedThreadId]);
   useEffect(() => {
     if (!context?.id) return;
-    const suggested = users.find((user) => user.employeeId && user.employeeId === context.suggestedEmployeeId && String(user.id) !== currentUserId);
-    setCreate({ type: context.type, title: context.title || '', contextId: context.id, userIds: suggested ? [suggested.id] : [] });
+    const employeeIds = context.suggestedEmployeeIds || [context.suggestedEmployeeId].filter(Boolean);
+    const userIds = users.filter((user) => user.employeeId && employeeIds.includes(user.employeeId) && String(user.id) !== currentUserId).map((user) => user.id);
+    setCreate({ type: context.type, title: context.title || '', contextId: context.id, userIds });
   }, [context?.id, context?.type, users.length]);
   useEffect(() => {
     if (!selectedId) return undefined;

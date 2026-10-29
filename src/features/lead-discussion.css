@@ -29,6 +29,10 @@
 .lead-chat-file-link{display:flex;align-items:center;gap:7px;max-width:100%;margin:7px 0;color:var(--teal);font-size:12px;text-decoration:none}
 .lead-chat-file-link span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lead-chat-file-link small{white-space:nowrap;color:var(--muted)}
+.lead-message-files{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0}
+.lead-message-files button{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--teal);cursor:pointer;font:inherit;font-size:12px;text-align:left}
+.lead-message-files button img{width:72px;height:72px;object-fit:cover;border-radius:4px}
+.lead-message-files button span{min-width:0;overflow-wrap:anywhere}
 .lead-recipients{position:relative;grid-column:1/-1;font-size:12px}
 .lead-recipients summary{cursor:pointer;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .lead-recipients>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px;max-height:175px;overflow:auto;padding:9px;background:#fff;border:1px solid var(--line);border-radius:6px}

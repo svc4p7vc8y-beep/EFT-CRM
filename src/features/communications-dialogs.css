@@ -43,6 +43,10 @@
 .dialog-thread-header-actions{display:flex;align-items:center;gap:7px;flex:none}
 .dialog-client-link{min-height:35px;padding:7px 10px;font-size:12px}
 .dialog-thread-menu>summary{width:35px;height:35px}
+.dialog-owners{padding:7px 16px;border-bottom:1px solid var(--dialog-line);background:var(--dialog-surface);font-size:12px}
+.dialog-owners summary{cursor:pointer;color:var(--teal)}
+.dialog-owners>div{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding-top:9px}
+.dialog-owners label{display:inline-flex;align-items:center;gap:5px}
 .communications-page .mobile-thread-back{display:none}
 .message-thread{min-height:0;padding:18px 24px;scrollbar-gutter:auto}
 .message-bubble{border-radius:12px 12px 12px 3px;padding:12px 14px}

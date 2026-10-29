@@ -47,6 +47,16 @@ test('импорт отбрасывает повреждённые связи и
 test('серверная заявка может временно оставаться без назначенного менеджера', () => {
   const state=createDemoState();state.leads[0].ownerId='';assert.doesNotThrow(()=>validateState(state));
 });
+test('заявка сохраняет нескольких ответственных и выбор основного', () => {
+  let state = applyCommand(createDemoState(), 'lead.create', { clientId: 'client-1', siteName: 'Дом для команды', nextAction: 'Позвонить', ownerIds: ['manager-1', 'worker-1'] });
+  const id = state.leads[0].id;
+  assert.deepEqual(state.leads[0].ownerIds, ['manager-1', 'worker-1']);
+  assert.equal(state.leads[0].ownerId, 'manager-1');
+  state = applyCommand(state, 'lead.update', { id, ownerIds: ['worker-1', 'manager-1'] });
+  assert.deepEqual(state.leads[0].ownerIds, ['worker-1', 'manager-1']);
+  assert.equal(state.leads[0].ownerId, 'worker-1');
+  assert.doesNotThrow(() => validateState(state));
+});
 test('общая задача может быть без исполнителя и срока', () => {
   let state=applyCommand(createDemoState(),'task.create',{title:'Распределить новую задачу',description:'',orderId:'',siteId:'',assigneeId:'',dueAt:'',quantity:1,completedQty:0,unit:'задача',priority:'normal',status:'planned'});
   assert.equal(state.tasks[0].assigneeId,'');assert.equal(state.tasks[0].dueAt,'');assert.doesNotThrow(()=>validateState(state));

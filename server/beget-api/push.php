@@ -112,7 +112,7 @@ function crm_push_emit_for_employee(string $employeeId, string $kind, string $ti
 
 function crm_push_notify_lead_activity(string $siteId, string $eventId, string $title, string $body, array $recipientIds = [], int $authorUserId = 0): void {
     if ($siteId === '') return;
-    $lead = crm_db()->prepare('SELECT id, owner_employee_id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
+    $lead = crm_db()->prepare('SELECT id, owner_employee_id, owner_employee_ids_json FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
     $lead->execute([$siteId]);
     $row = $lead->fetch();
     if (!$row) return;
@@ -124,7 +124,8 @@ function crm_push_notify_lead_activity(string $siteId, string $eventId, string $
         $site->execute([$siteId]);
         $ownerId = (string)($site->fetchColumn() ?: '');
     }
-    $employeeIds = array_values(array_unique(array_filter([...$recipientIds, $ownerId])));
+    $owners = json_decode((string)($row['owner_employee_ids_json'] ?? '[]'), true);
+    $employeeIds = array_values(array_unique(array_filter([...$recipientIds, ...(is_array($owners) ? $owners : []), $ownerId])));
     if ($employeeIds) {
         $placeholders = implode(',', array_fill(0, count($employeeIds), '?'));
         $recipients = crm_db()->prepare("SELECT id FROM crm_users WHERE active=1 AND employee_id IN ($placeholders)");

@@ -111,6 +111,8 @@ export const crmApi = {
   uploadConstructionPhoto: (stageId, file) => { const body = new FormData(); body.append('stageId', stageId); body.append('photo', file); return request('construction.photo', { method: 'POST', body }); },
   saveInventory: (inventory, baseRevision, deletionPassword = '') => request('inventory.save', { method: 'PUT', body: { inventory, baseRevision, deletionPassword } }),
   deletionStatus: () => request('deletion.status'),
+  deletionAccess: () => request('deletion.access'),
+  deletionUnlock: (password) => request('deletion.unlock', { method: 'POST', body: { password } }),
   updateDeletionPassword: (currentPassword, newPassword) => request('deletion.password.update', { method: 'POST', body: { currentPassword, newPassword } }),
   saveEmployee: (employee) => request('employees.save', { method: employee.id ? 'PUT' : 'POST', body: employee }),
   uploadEmployeePhoto: (employeeId, file) => {

@@ -90,6 +90,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   const swipeStart = useRef(null);
   const seenChatNotifications = useRef(null);
   const [notificationUnread, setNotificationUnread] = useState(0);
+  const [deletionUnlockedUntil, setDeletionUnlockedUntil] = useState(0);
   const [leadUnread, setLeadUnread] = useState(0);
   const [theme, setTheme] = useState(() => { const saved = localStorage.getItem(themeKey); return ['light', 'dark', 'brand'].includes(saved) ? saved : 'brand'; });
   const selected = state.leads.find((l) => l.id === selectedLead);
@@ -217,9 +218,9 @@ export function App({ runtime = { mode: 'demo' } }) {
   function openContextChat(type, id) {
     const task = type === 'task' ? state.tasks.find((item) => item.id === id) : null;
     const lead = type === 'lead' ? state.leads.find((item) => item.id === id) : null;
-    const employeeId = task?.assigneeId || lead?.ownerId;
+    const employeeIds = task?.assigneeIds || lead?.ownerIds || [task?.assigneeId || lead?.ownerId].filter(Boolean);
     const title = task?.title || (lead ? leadContext(state, lead).client.name : '');
-    setModal(null); setPage('chat'); setChatThreadId(''); setChatContext({ type, id, title, suggestedEmployeeId: employeeId || '' });
+    setModal(null); setPage('chat'); setChatThreadId(''); setChatContext({ type, id, title, suggestedEmployeeIds: employeeIds });
     setSidebar(false); window.location.hash = 'chat';
   }
   function mutate(action, payload, message = 'Сохранено', awaitSave = false) {
@@ -278,11 +279,11 @@ export function App({ runtime = { mode: 'demo' } }) {
   }
   function openLead(id) { if (!id) return; setSelectedLead(id); setPage('client'); setSearch(''); setSidebar(false); window.location.hash = `client/${encodeURIComponent(id)}`; }
   function openSite(id) { setSelectedSite(id); setPage('construction'); setSearch(''); setSidebar(false); window.location.hash = id ? `construction/${encodeURIComponent(id)}` : 'construction'; }
-  function requestDeletion(type,id,label) { try { const prepared=prepareDeletion(state,type,id); setModal({type:'delete',target:{type,id,label},counts:prepared.counts}); } catch(error) { setToast({text:error.message,error:true}); } }
+  async function requestDeletion(type,id,label) { try { const prepared=prepareDeletion(state,type,id); const access=await runtime.deletionAccess?.(); setDeletionUnlockedUntil(Number(access?.unlockedUntil||0)); setModal({type:'delete',target:{type,id,label},counts:prepared.counts}); } catch(error) { setToast({text:error.message,error:true}); } }
   async function confirmDeletion(password) {
     const target=modal?.target; if(!target) return;
     const prepared=prepareDeletion(state,target.type,target.id);
-    if(prepared.domain==='inventory') {
+    try { if(prepared.domain==='inventory') {
       await inventorySaveQueue.current;
       const saved=await runtime.saveInventory(prepared.snapshot,inventoryRevisionRef.current,password);
       inventoryRevisionRef.current=saved.inventoryRevision; setInventoryOverride(saved);
@@ -291,6 +292,8 @@ export function App({ runtime = { mode: 'demo' } }) {
       const saved=await runtime.saveWorkspace(prepared.snapshot,revisionRef.current,false,password);
       revisionRef.current=saved.workspaceRevision; setServerOverride(saved);
     }
+    } catch (error) { if (!password) setDeletionUnlockedUntil(0); throw error; }
+    if (password) setDeletionUnlockedUntil(Math.floor(Date.now()/1000)+1800);
     mutationGeneration.current++; setModal(null); setToast({text:'Запись удалена',error:false});
     if(target.type==='leads'&&selectedLead===target.id) navigate('leads');
     if(target.type==='sites'&&selectedSite===target.id) navigate('clients');
@@ -444,7 +447,7 @@ export function App({ runtime = { mode: 'demo' } }) {
   if (modal?.type === 'crew-form') dialog = <Dialog key={`crew-${modal.id || 'new'}`} title={modal.id ? 'Редактировать бригаду' : 'Новая бригада'} onClose={closeModal}><CrewForm state={personnelState} crew={personnelState.crews.find((c) => c.id === modal.id)} onClose={closeModal} onSubmit={async (p) => { if (liveSession) await runtime.saveCrew({ ...p, id: modal.id }); else mutate('crew.save', { ...p, id: modal.id }, 'Бригада сохранена'); setToast({ text: 'Бригада сохранена', error: false }); closeModal(); }} /></Dialog>;
   if (modal?.type === 'notifications') dialog = <Dialog title="Уведомления" onClose={closeModal} wide>{liveSession ? <NotificationCenter runtime={runtime} late={late} blocked={blocked} onLead={(id) => { openLead(id); closeModal(); }} onTask={(id) => setModal({ type: 'task', id })} onOpen={(target) => { closeModal(); if (!target?.startsWith('#')) return; window.location.hash = target; const route = getRoute(); setPage(route.page); setSelectedLead(route.leadId); setChatThreadId(route.chatId || ''); setFocusEventId(route.focusEventId || ''); setFocusMessageId(route.focusMessageId || ''); if (route.taskId) setModal({ type: 'task', id: route.taskId }); }} onCount={(total, leads) => { setNotificationUnread(Number(total || 0)); setLeadUnread(Number(leads || 0)); }} /> : <div className="form-content">{!late.length && !blocked.length ? <p>Просроченных контактов и блокировок нет.</p> : null}{late.map((l) => <button className="action-row" key={l.id} onClick={() => { openLead(l.id); closeModal(); }}><CalendarDays size={18} /><div><strong>{leadContext(state, l).client.name}</strong><span>{l.nextAction}</span></div></button>)}{blocked.map((t) => <button className="action-row" key={t.id} onClick={() => setModal({ type: 'task', id: t.id })}><AlertCircle size={18} /><div><strong>{t.title}</strong><span>{t.blockReason}</span></div></button>)}</div>}</Dialog>;
   if (modal?.type === 'planned') dialog = <Dialog title={navigation.find((n) => n.id === modal.id)?.label} onClose={closeModal}><div className="form-content"><p className="data-explanation">Этот раздел входит в следующие этапы разработки.</p><p>{modal.id === 'supplies' ? 'Потребности по объектам, заказы поставщикам, приёмка, резервы, выдача материалов и учёт инструмента.' : modal.id === 'crews' ? 'Состав бригад, специализации, назначение на строительные этапы и проверка занятости.' : 'Комплектация, рейсы, окна доставки и подтверждение приёмки на объекте.'}</p><p className="muted small">Сейчас доступны заявки, клиенты, история общения, цех, задачи и календарь.</p></div><footer className="dialog-actions"><button className="button primary" onClick={closeModal}>Понятно</button></footer></Dialog>;
-  if (modal?.type === 'delete') dialog = <DeletionDialog target={modal.target} counts={modal.counts} onClose={closeModal} onConfirm={confirmDeletion}/>;
+  if (modal?.type === 'delete') dialog = <DeletionDialog target={modal.target} counts={modal.counts} unlocked={deletionUnlockedUntil > Math.floor(Date.now()/1000)} onClose={closeModal} onConfirm={confirmDeletion}/>;
   const taskProps = { state, search, onCreate: (orderId) => setModal({ type: 'task-new', orderId }), onOpen: (id) => setModal({ type: 'task', id }), onMove: moveTask };
   return <div className="app-shell">
     {sidebar ? <button className="sidebar-backdrop" aria-label="Закрыть меню" onClick={() => setSidebar(false)} /> : null}

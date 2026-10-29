@@ -681,7 +681,21 @@ if ($action === 'inventory.save' && $method === 'PUT') {
 if ($action === 'deletion.status' && $method === 'GET') {
     $user = crm_user();
     if (!in_array((string)$user['role'], ['owner','admin'], true)) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Настройка доступна владельцу и администратору.'], 403);
-    crm_json(['ok'=>true,'configured'=>crm_deletion_configured()]);
+    crm_json(['ok'=>true,'configured'=>crm_deletion_configured(),'unlockedUntil'=>(int)($_SESSION['deletion_unlocked_until'] ?? 0)]);
+}
+
+if ($action === 'deletion.unlock' && $method === 'POST') {
+    crm_require_origin(); $user = crm_user(); crm_csrf();
+    if (!crm_can($user, 'clients.manage') && !crm_can($user, 'procurement.manage') && !crm_can($user, 'tasks.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Нет права на удаление записей.'],403);
+    $input = crm_input(4096);
+    crm_assert_deletion_password((string)($input['password'] ?? ''));
+    crm_json(['ok'=>true,'unlockedUntil'=>(int)$_SESSION['deletion_unlocked_until']]);
+}
+
+if ($action === 'deletion.access' && $method === 'GET') {
+    $user = crm_user();
+    if (!crm_can($user, 'clients.manage') && !crm_can($user, 'procurement.manage') && !crm_can($user, 'tasks.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Нет права на удаление записей.'],403);
+    crm_json(['ok'=>true,'unlockedUntil'=>(int)($_SESSION['deletion_unlocked_until'] ?? 0)]);
 }
 
 if ($action === 'deletion.password.update' && $method === 'POST') {
@@ -700,6 +714,7 @@ if ($action === 'deletion.password.update' && $method === 'POST') {
         unset($_SESSION['deletion_attempts']);
     }
     crm_db()->prepare('INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)')->execute(['deletion_password_hash',password_hash($next,PASSWORD_DEFAULT),(int)$user['id']]);
+    unset($_SESSION['deletion_unlocked_until'], $_SESSION['deletion_unlocked_user_id']);
     crm_audit((int)$user['id'],'deletion.password.update','settings');
     crm_json(['ok'=>true,'configured'=>true]);
 }
