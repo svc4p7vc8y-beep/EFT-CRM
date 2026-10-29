@@ -342,36 +342,37 @@ if ($action === 'notifications.unsubscribe' && $method === 'POST') {
 if ($action === 'notifications.preferences' && $method === 'POST') {
     crm_require_origin(); $user = crm_user(); crm_csrf(); crm_schema_ensure_v30(); $input = crm_input(2048);
     if (!empty($input['allLeadMessages']) && !crm_can($user, 'clients.view') && !crm_can($user, 'clients.manage')) crm_json(['ok' => false, 'message' => 'Нет доступа к сообщениям всех заявок.'], 403);
-    $prefs = [!empty($input['task']) ? 1 : 0, !empty($input['message']) ? 1 : 0, !empty($input['reminder']) ? 1 : 0, !empty($input['allLeadMessages']) ? 1 : 0];
-    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_enabled=VALUES(task_enabled), message_enabled=VALUES(message_enabled), reminder_enabled=VALUES(reminder_enabled), all_lead_messages_enabled=VALUES(all_lead_messages_enabled)');
+    if (!empty($input['allEvents']) && !crm_can($user, 'clients.view') && !crm_can($user, 'clients.manage') && !crm_can($user, 'tasks.view') && !crm_can($user, 'tasks.manage')) crm_json(['ok' => false, 'message' => 'Нет доступа к общим уведомлениям.'], 403);
+    $prefs = [!empty($input['task']) ? 1 : 0, !empty($input['message']) ? 1 : 0, !empty($input['reminder']) ? 1 : 0, !empty($input['allLeadMessages']) ? 1 : 0, !empty($input['allEvents']) ? 1 : 0];
+    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled, all_events_enabled) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE task_enabled=VALUES(task_enabled), message_enabled=VALUES(message_enabled), reminder_enabled=VALUES(reminder_enabled), all_lead_messages_enabled=VALUES(all_lead_messages_enabled), all_events_enabled=VALUES(all_events_enabled)');
     $statement->execute([(int)$user['id'], ...$prefs]);
     crm_json(['ok' => true, 'preferences' => crm_push_preferences((int)$user['id'])]);
 }
 
 if ($action === 'notifications.staff' && $method === 'GET') {
-    crm_require_capability('users.manage'); crm_schema_ensure_v30();
-    $rows = crm_db()->query('SELECT u.id, u.employee_id, u.role, u.active, COALESCE(p.all_lead_messages_enabled, 0) AS all_lead_messages_enabled FROM crm_users u LEFT JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.employee_id IS NOT NULL')->fetchAll();
+    crm_require_capability('notifications.manage'); crm_schema_ensure_v30();
+    $rows = crm_db()->query('SELECT u.id, u.employee_id, u.role, u.active, COALESCE(p.all_events_enabled, 0) AS all_events_enabled FROM crm_users u LEFT JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.employee_id IS NOT NULL')->fetchAll();
     crm_json(['ok' => true, 'staff' => array_map(static fn(array $row): array => [
         'userId' => (int)$row['id'], 'employeeId' => $row['employee_id'], 'active' => (bool)$row['active'],
-        'eligible' => crm_can($row, 'clients.view') || crm_can($row, 'clients.manage'),
-        'allLeadMessages' => (bool)$row['all_lead_messages_enabled'],
+        'eligible' => crm_can($row, 'clients.view') || crm_can($row, 'clients.manage') || crm_can($row, 'tasks.view') || crm_can($row, 'tasks.manage'),
+        'allEvents' => (bool)$row['all_events_enabled'],
     ], $rows)]);
 }
 
 if ($action === 'notifications.staff' && $method === 'POST') {
-    crm_require_origin(); $actor = crm_require_capability('users.manage'); crm_csrf(); crm_schema_ensure_v30();
+    crm_require_origin(); $actor = crm_require_capability('notifications.manage'); crm_csrf(); crm_schema_ensure_v30();
     $input = crm_input(2048);
     $employeeId = crm_text($input['employeeId'] ?? '', 36);
-    $enabled = !empty($input['allLeadMessages']);
+    $enabled = !empty($input['allEvents']);
     $find = crm_db()->prepare('SELECT id, role, active FROM crm_users WHERE employee_id=? LIMIT 1');
     $find->execute([$employeeId]);
     $account = $find->fetch();
     if (!$account) crm_json(['ok' => false, 'message' => 'У сотрудника нет учётной записи CRM.'], 404);
-    if ($enabled && (!(bool)$account['active'] || (!crm_can($account, 'clients.view') && !crm_can($account, 'clients.manage')))) crm_json(['ok' => false, 'message' => 'Для всех заявок нужна активная учётная запись с доступом к клиентам.'], 422);
-    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, all_lead_messages_enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE all_lead_messages_enabled=VALUES(all_lead_messages_enabled)');
+    if ($enabled && (!(bool)$account['active'] || (!crm_can($account, 'clients.view') && !crm_can($account, 'clients.manage') && !crm_can($account, 'tasks.view') && !crm_can($account, 'tasks.manage')))) crm_json(['ok' => false, 'message' => 'Нужна активная учётная запись с доступом к клиентам или задачам.'], 422);
+    $statement = crm_db()->prepare('INSERT INTO crm_notification_preferences (user_id, all_events_enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE all_events_enabled=VALUES(all_events_enabled)');
     $statement->execute([(int)$account['id'], $enabled ? 1 : 0]);
-    crm_audit((int)$actor['id'], 'notifications.staff.update', 'user', (string)$account['id'], ['allLeadMessages' => $enabled]);
-    crm_json(['ok' => true, 'employeeId' => $employeeId, 'allLeadMessages' => $enabled]);
+    crm_audit((int)$actor['id'], 'notifications.staff.update', 'user', (string)$account['id'], ['allEvents' => $enabled]);
+    crm_json(['ok' => true, 'employeeId' => $employeeId, 'allEvents' => $enabled]);
 }
 
 if ($action === 'notifications.read' && $method === 'POST') {
@@ -438,6 +439,7 @@ if ($action === 'tasks.create' && $method === 'POST') {
         if ($question !== '') $db->prepare("INSERT INTO crm_task_questions (task_id, question, requester_user_id, answer) VALUES (?, ?, ?, '')")->execute([$taskId, $question, (int)$user['id']]);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         foreach ($assigneeIds as $personId) if ($personId !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($personId, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : $title, '#task/' . $taskId, 'task:create:' . $taskId);
+        crm_push_emit_all('task', 'Новая задача', $title, '#task/' . $taskId, 'task:create:' . $taskId, (int)$user['id']);
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.create', 'task', $taskId, ['assigneeId' => $assignee]);
@@ -461,9 +463,11 @@ if ($action === 'tasks.answer' && $method === 'POST') {
         if ($task['previous_answer'] !== '') { $db->rollBack(); crm_json(['ok' => false, 'code' => 'already_answered', 'message' => 'Ответ уже отправлен. Обновите задачу, чтобы увидеть его.'], 409); }
         $db->prepare('UPDATE crm_task_questions SET answer=?, answered_by_user_id=?, answered_at=NOW() WHERE task_id=?')->execute([$answer, (int)$user['id'], $taskId]);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        $answerEventKey = 'answer:' . $taskId . ':' . bin2hex(random_bytes(8));
         if ((int)$task['requester_user_id'] !== (int)$user['id']) {
-            crm_push_emit((int)$task['requester_user_id'], 'task', 'Получен ответ на вопрос', $answer, '#task/' . $taskId, 'answer:' . $taskId . ':' . bin2hex(random_bytes(8)));
+            crm_push_emit((int)$task['requester_user_id'], 'task', 'Получен ответ на вопрос', $answer, '#task/' . $taskId, $answerEventKey);
         }
+        crm_push_emit_all('task', 'Получен ответ на вопрос', $answer, '#task/' . $taskId, $answerEventKey, (int)$user['id']);
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.answer', 'task', $taskId, ['requesterUserId' => (int)$task['requester_user_id']]);
@@ -489,6 +493,7 @@ if ($action === 'tasks.comment' && $method === 'POST') {
         $insert->execute([$id, $task['site_id'] ?: null, $taskId, $id, $body, (int)$user['id'], $user['employeeId'] ?: null]);
         foreach (crm_task_assignee_ids($task) as $personId) if ($personId !== (string)($user['employeeId'] ?? '')) crm_push_emit_for_employee($personId, 'message', 'Комментарий к задаче: ' . $task['title'], $body, '#task/' . $taskId, 'task-comment:' . $id);
         if ((int)$task['created_by'] !== (int)$user['id']) crm_push_emit((int)$task['created_by'], 'message', 'Комментарий к задаче: ' . $task['title'], $body, '#task/' . $taskId, 'task-comment:' . $id);
+        crm_push_emit_all('message', 'Комментарий к задаче: ' . $task['title'], $body, '#task/' . $taskId, 'task-comment:' . $id, (int)$user['id']);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
@@ -520,10 +525,12 @@ if ($action === 'tasks.complete' && $method === 'POST') {
         $id = crm_uuid();
         $insert = $db->prepare("INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,?,'note','note','internal',?,'completion',?,1,'[]','internal','',NOW(),?,?)");
         $insert->execute([$id, $task['site_id'] ?: null, $taskId, $id, $result, (int)$user['id'], $user['employeeId'] ?: null]);
+        crm_push_emit_all('task', 'Задача завершена', $result, '#task/' . $taskId, 'task-complete:' . $taskId, (int)$user['id']);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.complete', 'task', $taskId, ['messageId' => $id]);
+    try { crm_push_dispatch(8); } catch (Throwable $error) { error_log('EFT CRM completion push failed: ' . $error->getMessage()); }
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
 }
 
@@ -560,10 +567,12 @@ if ($action === 'tasks.check' && $method === 'POST') {
         $eventId = crm_uuid();
         $insert = $db->prepare("INSERT INTO crm_communications (id,site_id,task_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at,author_id,author_employee_id) VALUES (?,?,?,'system','system','internal',?,?,?,1,'[]','internal','',NOW(),?,?)");
         $insert->execute([$eventId, $task['site_id'] ?: null, $taskId, $eventId, $eventSubject, $eventText, (int)$user['id'], $user['employeeId'] ?: null]);
+        crm_push_emit_all('task', 'Изменён чек-лист задачи', $eventText, '#task/' . $taskId, 'task-check:' . $eventId, (int)$user['id']);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
         $db->commit();
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     crm_audit((int)$user['id'], 'task.check', 'task', $taskId, ['checkId' => $checkId]);
+    try { crm_push_dispatch(8); } catch (Throwable $error) { error_log('EFT CRM checklist push failed: ' . $error->getMessage()); }
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
 }
 

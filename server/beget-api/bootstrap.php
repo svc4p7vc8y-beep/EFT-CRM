@@ -158,7 +158,7 @@ function crm_user(): array {
 function crm_capabilities(string $role): array {
     $matrix = [
         'owner' => ['*'],
-        'admin' => ['employees.manage','crews.manage','clients.manage','tasks.manage','attendance.manage','procurement.manage','integrations.manage','audit.view'],
+        'admin' => ['employees.manage','crews.manage','clients.manage','tasks.manage','attendance.manage','procurement.manage','integrations.manage','notifications.manage','audit.view'],
         'finance' => ['employees.view','attendance.view','finance.view','finance.manage','procurement.view'],
         'manager' => ['employees.view','clients.manage','tasks.manage','attendance.self','procurement.view'],
         'production' => ['employees.view','crews.view','tasks.manage','attendance.manage','procurement.view'],
@@ -280,6 +280,7 @@ function crm_schema_ensure_v30(): void {
         ],
         'crm_notification_preferences' => [
             'all_lead_messages_enabled' => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER message_enabled',
+            'all_events_enabled' => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER all_lead_messages_enabled',
         ],
     ];
     $backfillChatDelivery = !crm_column_exists('crm_chat_members', 'last_delivered_id');
@@ -591,11 +592,12 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
             }
         }
         $employeeIds = array_fill_keys($db->query('SELECT id FROM crm_employees')->fetchAll(PDO::FETCH_COLUMN), true);
-        $previousTasks = []; $previousTaskCreators = [];
-        foreach ($db->query('SELECT id, assignee_id, assignee_ids_json, created_by FROM crm_tasks')->fetchAll() as $previousTask) {
+        $previousTasks = []; $previousTaskCreators = []; $previousTaskState = [];
+        foreach ($db->query('SELECT id, assignee_id, assignee_ids_json, created_by, title, status, due_at FROM crm_tasks')->fetchAll() as $previousTask) {
             $previousIds = json_decode((string)($previousTask['assignee_ids_json'] ?? '[]'), true);
             $previousTasks[$previousTask['id']] = is_array($previousIds) && $previousIds ? $previousIds : ($previousTask['assignee_id'] ? [$previousTask['assignee_id']] : []);
             $previousTaskCreators[$previousTask['id']] = (int)($previousTask['created_by'] ?? 0);
+            $previousTaskState[$previousTask['id']] = [$previousTask['title'], $previousTask['status'], $previousTask['due_at']];
         }
         $previousQuestions = []; $previousAnswers = [];
         foreach ($db->query('SELECT task_id, question, answer FROM crm_task_questions')->fetchAll() as $previousQuestion) {
@@ -695,7 +697,11 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
                 else $saveQuestion->execute([$taskId, $question, (int)$user['id']]);
             }
             if (!$initialize) foreach ($assigneeIds as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '') && (!in_array($recipientId, $previousTasks[$taskId] ?? [], true) || $questionChanged && $question !== '')) {
-                crm_push_emit_for_employee($recipientId, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : crm_text($row['title'] ?? '', 250), '#task/' . $taskId, 'task:' . ($revision + 1) . ':' . $taskId . ':' . $recipientId);
+                crm_push_emit_for_employee($recipientId, 'task', $question !== '' ? 'Вам задан вопрос' : 'Вам назначена задача', $question !== '' ? $question : crm_text($row['title'] ?? '', 250), '#task/' . $taskId, 'task:all:' . ($revision + 1) . ':' . $taskId);
+            }
+            $nextTaskState = [crm_text($row['title'] ?? '', 250), $status, crm_sql_datetime($row['dueAt'] ?? '')];
+            if (!$initialize && (!isset($previousTaskState[$taskId]) || $previousTaskState[$taskId] !== $nextTaskState || ($previousTasks[$taskId] ?? []) !== $assigneeIds || $questionChanged)) {
+                crm_push_emit_all('task', isset($previousTaskState[$taskId]) ? 'Задача изменена' : 'Новая задача', $nextTaskState[0], '#task/' . $taskId, 'task:all:' . ($revision + 1) . ':' . $taskId, (int)$user['id']);
             }
         }
         $db->exec('DELETE q FROM crm_task_questions q LEFT JOIN crm_tasks t ON t.id=q.task_id WHERE t.id IS NULL');
@@ -716,8 +722,9 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
                 if (empty($row['taskId']) && !empty($row['siteId'])) {
                     crm_push_notify_lead_activity((string)$row['siteId'], $activityId, 'Новая запись по заявке', crm_text($row['text'] ?? '', 300), $recipients, (int)$user['id']);
                 } elseif ($direction === 'internal') foreach ($recipients as $recipientId) if ($recipientId !== (string)($user['employeeId'] ?? '')) {
-                    crm_push_emit_for_employee($recipientId, 'message', 'Новый комментарий к задаче', crm_text($row['text'] ?? '', 300), '#task/' . $row['taskId'], 'activity:' . $activityId . ':' . $recipientId);
+                    crm_push_emit_for_employee($recipientId, 'message', 'Новый комментарий к задаче', crm_text($row['text'] ?? '', 300), '#task/' . $row['taskId'], 'activity:all:' . $activityId);
                 }
+                if (!empty($row['taskId'])) crm_push_emit_all('message', 'Новая запись по задаче', crm_text($row['text'] ?? '', 300), '#task/' . $row['taskId'], 'activity:all:' . $activityId, (int)$user['id']);
             }
         }
         $nextRevision = $revision + 1;

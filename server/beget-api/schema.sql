@@ -461,6 +461,7 @@ CREATE TABLE IF NOT EXISTS crm_notification_preferences (
   task_enabled TINYINT(1) NOT NULL DEFAULT 1,
   message_enabled TINYINT(1) NOT NULL DEFAULT 1,
   all_lead_messages_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  all_events_enabled TINYINT(1) NOT NULL DEFAULT 0,
   reminder_enabled TINYINT(1) NOT NULL DEFAULT 1,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_crm_notification_preferences_user FOREIGN KEY (user_id) REFERENCES crm_users(id) ON DELETE CASCADE

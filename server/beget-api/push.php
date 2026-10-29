@@ -40,10 +40,22 @@ function crm_push_key_valid(string $key, int $bytes): bool {
 }
 
 function crm_push_preferences(int $userId): array {
-    $statement = crm_db()->prepare('SELECT task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled FROM crm_notification_preferences WHERE user_id=?');
+    $statement = crm_db()->prepare('SELECT task_enabled, message_enabled, reminder_enabled, all_lead_messages_enabled, all_events_enabled FROM crm_notification_preferences WHERE user_id=?');
     $statement->execute([$userId]);
-    $row = $statement->fetch() ?: ['task_enabled' => 1, 'message_enabled' => 1, 'reminder_enabled' => 1, 'all_lead_messages_enabled' => 0];
-    return ['task' => (bool)$row['task_enabled'], 'message' => (bool)$row['message_enabled'], 'reminder' => (bool)$row['reminder_enabled'], 'allLeadMessages' => (bool)$row['all_lead_messages_enabled']];
+    $row = $statement->fetch() ?: ['task_enabled' => 1, 'message_enabled' => 1, 'reminder_enabled' => 1, 'all_lead_messages_enabled' => 0, 'all_events_enabled' => 0];
+    return ['task' => (bool)$row['task_enabled'], 'message' => (bool)$row['message_enabled'], 'reminder' => (bool)$row['reminder_enabled'], 'allLeadMessages' => (bool)$row['all_lead_messages_enabled'], 'allEvents' => (bool)$row['all_events_enabled']];
+}
+
+function crm_push_emit_all(string $kind, string $title, string $body, string $targetPath, string $eventKey, int $authorUserId = 0): void {
+    // Private chat notifications are intentionally never broadcast.
+    if (str_starts_with($targetPath, '#chat/') || str_starts_with($eventKey, 'test:')) return;
+    $capability = str_starts_with($targetPath, '#task/') || $targetPath === '#tasks' ? 'tasks.view' : 'clients.view';
+    $users = crm_db()->query('SELECT u.id, u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND p.all_events_enabled=1');
+    foreach ($users->fetchAll() as $recipient) {
+        if ((int)$recipient['id'] === $authorUserId) continue;
+        if (!crm_can($recipient, $capability) && !crm_can($recipient, $capability === 'tasks.view' ? 'tasks.manage' : 'clients.manage')) continue;
+        crm_push_emit((int)$recipient['id'], $kind, $title, $body, $targetPath, $eventKey);
+    }
 }
 
 function crm_push_emit(int $userId, string $kind, string $title, string $body, string $targetPath, string $eventKey): bool {
@@ -81,7 +93,7 @@ function crm_push_notify_lead_activity(string $siteId, string $eventId, string $
         $recipients->execute($employeeIds);
         foreach ($recipients->fetchAll(PDO::FETCH_COLUMN) as $userId) if ((int)$userId !== $authorUserId) crm_push_emit((int)$userId, 'message', $title, $body, $target, $eventKey);
     }
-    $all = crm_db()->query('SELECT u.id,u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND p.all_lead_messages_enabled=1');
+    $all = crm_db()->query('SELECT u.id,u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND (p.all_lead_messages_enabled=1 OR p.all_events_enabled=1)');
     foreach ($all->fetchAll() as $recipient) if ((int)$recipient['id'] !== $authorUserId && (crm_can($recipient, 'clients.view') || crm_can($recipient, 'clients.manage'))) crm_push_emit((int)$recipient['id'], 'message', $title, $body, $target, $eventKey);
 }
 
@@ -115,6 +127,7 @@ function crm_push_due_reminders(): int {
     $rows = crm_db()->query("SELECT id, assignee_id, title, due_at FROM crm_tasks WHERE assignee_id IS NOT NULL AND status NOT IN ('done') AND due_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 1 HOUR) ORDER BY due_at LIMIT 200")->fetchAll();
     foreach ($rows as $row) {
         crm_push_emit_for_employee((string)$row['assignee_id'], 'reminder', 'Скоро срок задачи', (string)$row['title'], '#task/' . $row['id'], 'due:' . $row['id'] . ':' . $row['due_at']);
+        crm_push_emit_all('reminder', 'Скоро срок задачи', (string)$row['title'], '#task/' . $row['id'], 'due:' . $row['id'] . ':' . $row['due_at']);
     }
     return count($rows);
 }
@@ -147,7 +160,7 @@ function crm_push_dispatch(int $limit = 12, ?string $eventKey = null): int {
     $sent = 0;
     foreach ($claimed as $row) {
         $prefs = crm_push_preferences((int)$row['user_id']);
-        if (!$prefs[$row['kind']]) { $complete->execute([(int)$row['id']]); continue; }
+        if (!$prefs[$row['kind']] && !$prefs['allEvents']) { $complete->execute([(int)$row['id']]); continue; }
         $subscriptions->execute([(int)$row['user_id']]);
         $devices = $subscriptions->fetchAll();
         if (!$devices) { $complete->execute([(int)$row['id']]); continue; }
