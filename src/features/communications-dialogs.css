@@ -127,7 +127,7 @@
 }
 
 :root[data-theme="dark"] .communications-page{--dialog-surface:#121212;--dialog-soft:#222;--dialog-thread:#000;--dialog-ink:#fff;--dialog-subtle:#c5c5c5}
-:root[data-theme="dark"] :is(.message-thread,.lead-chat-list,.chat-message-list){background:#000!important;color:#fff}
+:root[data-theme="dark"] :is(.message-thread,.lead-chat-list,.chat-message-list){background:#000!important;background-image:none!important;color:#fff}
 :root[data-theme="dark"] :is(.message-bubble,.lead-chat-bubble,.chat-message){background:#181818!important;color:#fff!important;border-color:#393939}
 :root[data-theme="dark"] :is(.message-bubble.outgoing,.lead-chat-list li.own .lead-chat-bubble,.chat-message.own){background:#17352a!important;color:#fff!important}
 :root[data-theme="dark"] :is(.message-bubble,.lead-chat-bubble,.chat-message) :is(p,strong,header,span){color:#fff}

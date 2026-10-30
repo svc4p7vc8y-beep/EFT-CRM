@@ -47,8 +47,9 @@ function crm_avito_media(array $content): array {
     $sources = [];
     foreach (['file', 'document', 'video', 'audio'] as $kind) {
         $file = $content[$kind] ?? null;
-        if (is_array($file) && is_string($file['url'] ?? $file['link'] ?? null)) $sources[] = ['url'=>$file['url'] ?? $file['link'], 'name'=>$file['name'] ?? $file['filename'] ?? 'Файл из Авито'];
+        if (is_array($file) && is_string($file['url'] ?? $file['link'] ?? null)) $sources[] = ['url'=>$file['url'] ?? $file['link'], 'name'=>$file['name'] ?? $file['filename'] ?? $file['file_name'] ?? 'Файл из Авито'];
     }
+    if (is_string($content['image']['url'] ?? null)) $sources[]=['url'=>$content['image']['url'],'name'=>'Фото из Авито'];
     $sizes = $content['image']['sizes'] ?? [];
     if (is_array($sizes) && $sizes) {
         uksort($sizes, static fn($a,$b) => (int)explode('x',(string)$b)[0] <=> (int)explode('x',(string)$a)[0]);
