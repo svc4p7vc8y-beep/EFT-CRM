@@ -16,5 +16,10 @@ try {
     error_log('EFT CRM scheduled mail sync failed: ' . $error->getMessage());
 }
 
+try {
+    require_once __DIR__.'/avito.php';
+    $avito=crm_integration_config('avito'); if (!empty($avito['enabled'])) crm_avito_sync($avito);
+} catch (Throwable $error) { error_log('EFT CRM scheduled Avito sync failed: '.$error->getMessage()); }
+
 crm_push_due_reminders();
 crm_push_dispatch(50);

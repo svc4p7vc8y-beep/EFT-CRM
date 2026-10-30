@@ -132,6 +132,7 @@ function crm_push_notify_lead_activity(string $siteId, string $eventId, string $
         $recipients->execute($employeeIds);
         foreach ($recipients->fetchAll(PDO::FETCH_COLUMN) as $userId) if ((int)$userId !== $authorUserId) crm_push_emit((int)$userId, 'message', $title, $body, $target, $eventKey);
     }
+    if (!$employeeIds) foreach (crm_db()->query("SELECT id FROM crm_users WHERE active=1 AND role IN ('owner','admin')")->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId,'message',$title,$body,$target,$eventKey);
     $all = crm_db()->query('SELECT u.id,u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND (p.all_lead_messages_enabled=1 OR p.all_events_enabled=1)');
     foreach ($all->fetchAll() as $recipient) if ((int)$recipient['id'] !== $authorUserId && (crm_can($recipient, 'clients.view') || crm_can($recipient, 'clients.manage'))) crm_push_emit((int)$recipient['id'], 'message', $title, $body, $target, $eventKey);
 }

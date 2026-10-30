@@ -27,6 +27,15 @@ if ($action === 'health' && $method === 'GET') {
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
 }
 
+if ($action === 'connectors.avito.media.inspect' && $method === 'GET') {
+    crm_require_capability('integrations.manage');
+    $config=crm_integration_config('avito'); $token=crm_avito_token($config); $chatId=crm_avito_chat_id((string)($_GET['chatId'] ?? ''));
+    $data=crm_avito_request($token,'GET','/messenger/v3/accounts/'.rawurlencode((string)$config['account_id']).'/chats/'.rawurlencode($chatId).'/messages/?limit=100&offset=0');
+    $shape=function($value,$key='') use (&$shape) { if (is_array($value)) { $out=[];foreach($value as $k=>$v) $out[$k]=$shape($v,(string)$k);return $out; } if(is_string($value) && str_starts_with($value,'https://')) return ['host'=>parse_url($value,PHP_URL_HOST),'path'=>parse_url($value,PHP_URL_PATH)]; return in_array($key,['type','name','filename','file_name'],true)?$value:get_debug_type($value); };
+    $rows=array_is_list($data)?$data:($data['messages'] ?? []); $out=[];foreach($rows as $row) if(($row['type'] ?? '')!=='text') $out[]=['type'=>$row['type'] ?? '', 'content'=>$shape($row['content'] ?? [])];
+    crm_json(['ok'=>true,'messages'=>$out]);
+}
+
 if ($action === 'connectors.avito.webhook' && $method === 'POST') {
     $raw=file_get_contents('php://input');
     if ($raw===false || strlen($raw)>1024*1024) crm_json(['ok'=>false],413);
@@ -173,6 +182,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $siteId = $chatSites[$chatId] ?? array_search($chatId, $map, true);
     crm_schema_ensure_v30();
     $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
+    if ($siteId === false || !$siteId) $siteId=crm_external_conversation_site('max',$chatId,$sender,'Обращение из MAX');
     $metadataItems = [['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'max_chat', 'id' => $chatId], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']];
     foreach (array_slice($images, 0, 12) as $image) $metadataItems[] = crm_max_image_attachment($image);
     $target = (array)($config['chat_targets'][$chatId] ?? []);
@@ -195,8 +205,9 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
                     $users->execute($ids);
                     foreach ($users->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId, 'message', 'Новое сообщение в MAX', mb_substr($sender . ': ' . $text, 0, 300), '#communications', 'max:' . $eventId);
                 }
-            } elseif ($siteId !== false) crm_push_notify_site((string)$siteId, $eventId);
-            crm_push_dispatch(50, $recipients ? 'max:' . $eventId : 'message:' . $eventId);
+            }
+            if ($siteId !== false && $siteId) crm_push_notify_site((string)$siteId, $eventId);
+            crm_push_dispatch(50);
         } catch (Throwable $error) { error_log('EFT CRM MAX push failed: ' . $error->getMessage()); }
     }
     crm_json(['ok' => true]);

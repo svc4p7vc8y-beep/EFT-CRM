@@ -82,6 +82,8 @@ function crm_avito_import_message(array $config, string $chatId, array $message,
     $existingQuery=crm_db()->prepare('SELECT id,attachments_json FROM crm_communications WHERE external_key=? LIMIT 1');
     $existingQuery->execute(['avito-'.$id]); $existing=$existingQuery->fetch();
     $oldEntries=$existing ? (json_decode((string)$existing['attachments_json'],true) ?: []) : [];
+    $mappedSite=(string)($config['chat_site_ids'][$chatId] ?? '');
+    if ($mappedSite === '') $mappedSite=crm_external_conversation_site('avito',$chatId,(string)($metadata['sender'] ?? 'Клиент Авито'),(string)($metadata['adTitle'] ?? ''));
     if ($existing && array_filter($oldEntries,static fn($entry)=>($entry['kind'] ?? '')==='avito_media')) return false;
     $direction = ($message['direction'] ?? 'in') === 'out' ? 'outgoing' : 'incoming';
     $content = is_array($message['content'] ?? null) ? $message['content'] : [];
@@ -101,7 +103,7 @@ function crm_avito_import_message(array $config, string $chatId, array $message,
     if (!empty($metadata['adTitle']) || !empty($metadata['adUrl'])) $attachments[] = ['kind'=>'avito_ad','title'=>(string)($metadata['adTitle'] ?? ''),'url'=>(string)($metadata['adUrl'] ?? ''),'itemId'=>(string)($metadata['itemId'] ?? '')];
     $attachments = [...$attachments,...$media];
     if (!$media && in_array($kind,['image','file','document','video','voice'],true)) $attachments[]=['kind'=>'avito_media_unavailable','name'=>'Вложение в Авито'];
-    $siteId = (string)($config['chat_site_ids'][$chatId] ?? '');
+    $siteId = $mappedSite;
     $site = null;
     if ($siteId !== '') { $check=crm_db()->prepare('SELECT id FROM crm_sites WHERE id=?'); $check->execute([$siteId]); $site=$check->fetchColumn() ?: null; }
     $created = (int)($message['created'] ?? time());

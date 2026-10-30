@@ -955,7 +955,7 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         return ['status' => 'sent', 'externalKey' => (string)($result['messages'][0]['id'] ?? '')];
     }
     if ($channel === 'max') {
-        $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=$maxChatId!==''?$maxChatId:(string)($map[$siteId]??'');
+        $config=crm_integration_config('max');$token=(string)($config['bot_token']??'');$map=is_array($config['site_chat_ids']??null)?$config['site_chat_ids']:[];$chatId=$maxChatId!==''?$maxChatId:((string)($map[$siteId]??'') ?: crm_external_chat_for_site('max',$siteId));
         if(empty($config['enabled'])||$token==='') return ['status'=>'saved','externalKey'=>''];
         if($chatId===''||!preg_match('/^-?\d+$/',$chatId)) throw new RuntimeException('Для объекта не указан MAX chat ID.');
         return crm_max_send_message($token, $chatId, $body, $files);
@@ -963,7 +963,7 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
     if ($channel === 'avito') {
         $config=crm_integration_config('avito');
         if (empty($config['enabled'])) throw new RuntimeException('Сначала подключите Авито в настройках общения.');
-        $chatId=$avitoChatId!==''?$avitoChatId:(string)($config['site_chat_ids'][$siteId] ?? '');
+        $chatId=$avitoChatId!==''?$avitoChatId:((string)($config['site_chat_ids'][$siteId] ?? '') ?: crm_external_chat_for_site('avito',$siteId));
         if ($chatId==='') throw new RuntimeException('У объекта нет привязанного диалога Авито.');
         if ($files) throw new RuntimeException('Пока можно отправлять в Авито только текст.');
         $result=crm_avito_send($config,$chatId,$body);
@@ -1027,4 +1027,38 @@ function crm_money_cents(mixed $value): int {
     $number = round((float)$value * 100);
     if ($number < 0 || $number > 1000000000) crm_json(['ok' => false, 'code' => 'validation_failed', 'message' => 'Проверьте сумму.'], 422);
     return (int)$number;
+}
+
+
+function crm_external_chat_for_site(string $channel,string $siteId): string {
+    $q=crm_db()->prepare('SELECT attachments_json FROM crm_communications WHERE channel=? AND site_id=? ORDER BY occurred_at DESC LIMIT 20'); $q->execute([$channel,$siteId]);
+    foreach($q->fetchAll(PDO::FETCH_COLUMN) as $json) foreach((array)json_decode((string)$json,true) as $entry) if(($entry['kind'] ?? '')===$channel.'_chat') return (string)($entry['id'] ?? '');
+    return '';
+}
+
+// One persistent CRM object per external conversation; never merge people by name.
+function crm_external_conversation_site(string $channel,string $chatId,string $name,string $title): string {
+    $db=crm_db(); $kind=$channel.'_chat';
+    $find=$db->prepare("SELECT site_id FROM crm_communications WHERE channel=? AND site_id IS NOT NULL AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind',?,'id',?)) LIMIT 1");
+    $find->execute([$channel,$kind,$chatId]); $linked=$find->fetchColumn(); if ($linked) return (string)$linked;
+    $hash=hash('sha256',$channel.':'.$chatId);
+    $uuid=static fn(string $seed):string => substr($seed,0,8).'-'.substr($seed,8,4).'-4'.substr($seed,13,3).'-a'.substr($seed,17,3).'-'.substr($seed,20,12);
+    $siteId=$uuid($hash); $clientId=$uuid(hash('sha256','client:'.$hash)); $leadId=$uuid(hash('sha256','lead:'.$hash));
+    $lock='crm-conversation:'.substr($hash,0,40); $q=$db->prepare('SELECT GET_LOCK(?,10)');$q->execute([$lock]);if (!(int)$q->fetchColumn()) throw new RuntimeException('Повторите загрузку диалога.');
+    try {
+        $db->beginTransaction();
+        // A manual link may have been saved while waiting for the lock.
+        $find->execute([$channel,$kind,$chatId]); $linked=$find->fetchColumn();
+        if ($linked) { $db->commit(); return (string)$linked; }
+        $account=$db->query("SELECT id,employee_id FROM crm_users WHERE active=1 AND role IN ('owner','admin') ORDER BY role='owner' DESC,id LIMIT 1")->fetch();
+        if (!$account) throw new RuntimeException('Нет администратора для новой заявки.');
+        $owner=$account['employee_id'] ?: null; $source=$channel==='avito'?'Авито':'MAX';
+        $db->prepare("INSERT IGNORE INTO crm_clients (id,display_name,phone,email,source,notes,created_by) VALUES (?,?,'','',?,'',?)")->execute([$clientId,crm_text($name ?: $source,220),$source,(int)$account['id']]);
+        $db->prepare('INSERT IGNORE INTO crm_sites (id,client_id,name,manager_employee_id) VALUES (?,?,?,?)')->execute([$siteId,$clientId,crm_text($title ?: 'Обращение из '.$source,220),$owner]);
+        $db->prepare("INSERT IGNORE INTO crm_leads (id,site_id,public_number,status,owner_employee_id,owner_employee_ids_json,next_action,source,notes,checklist_json) VALUES (?,?,?,'new',?,?,?,?,'','[]')")->execute([$leadId,$siteId,'L-'.substr($hash,0,16),$owner,json_encode($owner?[$owner]:[]),'Ответить клиенту',$source]);
+        $db->prepare("UPDATE crm_communications SET site_id=? WHERE channel=? AND site_id IS NULL AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind',?,'id',?))")->execute([$siteId,$channel,$kind,$chatId]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+        $db->commit(); return $siteId;
+    } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    finally { $q=$db->prepare('SELECT RELEASE_LOCK(?)');$q->execute([$lock]); }
 }
