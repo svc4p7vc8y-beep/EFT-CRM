@@ -139,3 +139,5 @@
 
 :root[data-theme="dark"] .communications-page :is(.unassigned-link-bar,.communication-assistant,.communication-batch,.connector-panel){background:#121212;color:#fff;border-color:#393939}
 :root[data-theme="dark"] .communications-page .unassigned-link-bar strong{color:#fff}
+
+.avito-document-card{display:flex;gap:12px;align-items:flex-start;padding:12px;margin-block:10px;border:1px solid var(--line);border-radius:8px}.avito-document-card>svg{flex:none}.avito-document-card p{margin:5px 0;font-size:12px}.avito-document-card a{display:block;color:var(--teal);margin:8px 0}.avito-document-card .button{font-size:12px;cursor:pointer}

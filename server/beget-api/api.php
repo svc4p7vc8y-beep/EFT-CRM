@@ -32,7 +32,7 @@ if ($action === 'connectors.avito.media.inspect' && $method === 'GET') {
     $config=crm_integration_config('avito'); $token=crm_avito_token($config); $chatId=crm_avito_chat_id((string)($_GET['chatId'] ?? ''));
     $data=crm_avito_request($token,'GET','/messenger/v3/accounts/'.rawurlencode((string)$config['account_id']).'/chats/'.rawurlencode($chatId).'/messages/?limit=100&offset=0');
     $shape=function($value,$key='') use (&$shape) { if (is_array($value)) { $out=[];foreach($value as $k=>$v) $out[$k]=$shape($v,(string)$k);return $out; } if(is_string($value) && str_starts_with($value,'https://')) return ['host'=>parse_url($value,PHP_URL_HOST),'path'=>parse_url($value,PHP_URL_PATH)]; return in_array($key,['type','name','filename','file_name'],true)?$value:get_debug_type($value); };
-    $rows=array_is_list($data)?$data:($data['messages'] ?? []); $out=[];foreach($rows as $row) if(($row['type'] ?? '')!=='text') $out[]=['type'=>$row['type'] ?? '', 'content'=>$shape($row['content'] ?? [])];
+    $rows=array_is_list($data)?$data:($data['messages'] ?? []); $out=[];foreach($rows as $row) if(($row['type'] ?? '')!=='text') $out[]=['type'=>$row['type'] ?? '', 'content'=>$shape($row['content'] ?? []),'fields'=>$shape($row)];
     crm_json(['ok'=>true,'messages'=>$out]);
 }
 
@@ -1308,6 +1308,23 @@ if ($action === 'communications.ignore' && $method === 'POST') {
     crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
     crm_audit((int)$user['id'], $ignored ? 'communication.ignore' : 'communication.restore', 'communication', $messageId);
     crm_json(['ok' => true, 'workspace' => crm_workspace_for_user($user)]);
+}
+
+if ($action === 'communications.attachment.upload' && $method === 'POST') {
+    crm_require_origin(); $user=crm_user();crm_csrf();crm_schema_ensure_v30();
+    if (!crm_can($user,'clients.manage') && !crm_can($user,'integrations.manage')) crm_json(['ok'=>false,'message'=>'Нет прав на добавление файла.'],403);
+    $messageId=crm_required_text($_POST['messageId'] ?? '', 'сообщение',36);
+    $q=crm_db()->prepare("SELECT id FROM crm_communications WHERE id=? AND channel='avito'");$q->execute([$messageId]);if(!$q->fetchColumn()) crm_json(['ok'=>false,'message'=>'Сообщение не найдено.'],404);
+    [$items]=crm_communication_store_uploads($_FILES['files'] ?? null);if(!$items) crm_json(['ok'=>false,'message'=>'Выберите файл.'],422);
+    $db=crm_db();$db->beginTransaction();
+    try {
+        $q=$db->prepare('SELECT attachments_json FROM crm_communications WHERE id=? FOR UPDATE');$q->execute([$messageId]);$entries=json_decode((string)$q->fetchColumn(),true) ?: [];
+        $entries=array_values(array_filter($entries,static fn($entry)=>($entry['kind'] ?? '')!=='avito_media_unavailable'));
+        $db->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?')->execute([json_encode([...$entries,...$items],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$messageId]);
+        $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");$db->commit();
+    } catch(Throwable $error) {if($db->inTransaction())$db->rollBack();throw $error;}
+    crm_audit((int)$user['id'],'communication.attachment.upload','communication',$messageId,['files'=>count($items)]);
+    crm_json(['ok'=>true,'workspace'=>crm_workspace_for_user($user)]);
 }
 
 if ($action === 'communications.max.recover-images' && $method === 'POST') {

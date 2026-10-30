@@ -89,20 +89,23 @@ function crm_avito_import_message(array $config, string $chatId, array $message,
     $content = is_array($message['content'] ?? null) ? $message['content'] : [];
     $kind = (string)($message['type'] ?? 'text');
     $body = trim((string)($content['text'] ?? $content['link']['text'] ?? $content['item']['title'] ?? ''));
-    if ($body === '') $body = match ($kind) { 'image'=>'Фото в Авито','voice'=>'Голосовое сообщение в Авито','call'=>'Звонок через Авито','deleted'=>'Сообщение удалено','system'=>'Системное сообщение Авито',default=>'Сообщение в Авито' };
+    if ($body === '') $body = match ($kind) { 'file'=>'Документ из Авито','document'=>'Документ из Авито','image'=>'Фото в Авито','voice'=>'Голосовое сообщение в Авито','call'=>'Звонок через Авито','deleted'=>'Сообщение удалено','system'=>'Системное сообщение Авито',default=>'Сообщение в Авито' };
     $body = crm_text($body,20000);
     $media=crm_avito_media($content);
     if ($existing) {
-        if (!$media) return false;
-        $update=crm_db()->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?');
-        $update->execute([json_encode([...$oldEntries,...$media],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$existing['id']]);
+        if (!$media) {
+            if (!in_array($kind,['file','document','image','voice','video'],true) || array_filter($oldEntries,static fn($entry)=>($entry['kind'] ?? '')==='avito_media_unavailable' || !empty($entry['key']))) return false;
+            $media=[['kind'=>'avito_media_unavailable','name'=>in_array($kind,['file','document'],true)?'Документ из Авито':'Вложение из Авито','chatId'=>$chatId]];
+        }
+        $update=crm_db()->prepare('UPDATE crm_communications SET attachments_json=?,body=? WHERE id=?');
+        $update->execute([json_encode([...$oldEntries,...$media],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$body,$existing['id']]);
         return true;
     }
     $sender = (string)($metadata['sender'] ?? 'Собеседник Авито');
     $attachments = [['kind'=>'avito_chat','id'=>$chatId],['kind'=>'sender','name'=>$sender],['kind'=>'workflow','status'=>$direction==='incoming'?'reply':'waiting','followUpAt'=>'']];
     if (!empty($metadata['adTitle']) || !empty($metadata['adUrl'])) $attachments[] = ['kind'=>'avito_ad','title'=>(string)($metadata['adTitle'] ?? ''),'url'=>(string)($metadata['adUrl'] ?? ''),'itemId'=>(string)($metadata['itemId'] ?? '')];
     $attachments = [...$attachments,...$media];
-    if (!$media && in_array($kind,['image','file','document','video','voice'],true)) $attachments[]=['kind'=>'avito_media_unavailable','name'=>'Вложение в Авито'];
+    if (!$media && in_array($kind,['image','file','document','video','voice'],true)) $attachments[]=['kind'=>'avito_media_unavailable','name'=>in_array($kind,['file','document'],true)?'Документ из Авито':'Вложение из Авито','chatId'=>$chatId];
     $siteId = $mappedSite;
     $site = null;
     if ($siteId !== '') { $check=crm_db()->prepare('SELECT id FROM crm_sites WHERE id=?'); $check->execute([$siteId]); $site=$check->fetchColumn() ?: null; }
