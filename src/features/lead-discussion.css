@@ -5,7 +5,8 @@
 .lead-checklist .check-row{margin:9px 0}
 .lead-checklist .inline-form{margin:14px 0 0}
 .lead-checklist .inline-form .voice-field-control{flex:1;min-width:0}
-.lead-chat-list{display:grid;gap:10px;max-height:460px;overflow:auto;list-style:none;margin:0;padding:16px;background:#f2f7f4;border:1px solid #dfe9e1;border-radius:9px}
+.lead-chat-list{display:grid;gap:10px;max-height:460px;overflow:auto;list-style:none;margin:0;padding:16px;background:#f2f7f4 url('/chat-logo-pattern.svg') repeat;background-size:760px 600px;border:1px solid #dfe9e1;border-radius:9px}
+:root[data-theme="dark"] .lead-chat-list{background-color:#17252a;background-image:url('/chat-logo-pattern-dark.svg')}
 .lead-chat-list li{display:flex;justify-content:flex-start;min-width:0}
 .lead-chat-list li.own{justify-content:flex-end}
 .lead-chat-list li.system{justify-content:center}

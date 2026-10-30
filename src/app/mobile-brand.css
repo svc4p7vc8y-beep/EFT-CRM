@@ -246,7 +246,7 @@
   .thread-column, .chat-conversation { background: #f4f7f1; }
   .thread-header, .chat-conversation-head, .message-composer, .chat-compose { border-color: var(--mobile-line); background: var(--mobile-surface); }
   .message-bubble.outgoing, .chat-message.own { background: #e9f5e4; border-color: #c8e3bc; }
-  .chat-message-list { background-image: linear-gradient(#f4f7f1e9,#f4f7f1e9),url('/eft-logo.jpg'); }
+  .chat-message-list { background-color: #f4f7f1; }
   .chat-message-list, .message-thread { color: var(--mobile-ink); }
 
   :is(.table-wrap, .calendar-grid, .workload, .communication-file-library) { border-color: var(--mobile-line); border-radius: 10px; }
@@ -368,6 +368,6 @@
   :root[data-theme="dark"] :is(.dialog-list-search, .search-input, .shared-files-search, .task-period-mobile summary, .staff-filter summary) { background: var(--mobile-soft); border-color: var(--mobile-line); color: var(--mobile-ink); }
   :root[data-theme="dark"] :is(.leads-page .leads-table td:first-child .cell-link strong, .clients-page td:first-child .cell-link strong, .conversation-copy strong, .chat-thread-copy strong, .task-row-title, .task-row-title strong) { color: var(--mobile-ink); }
   :root[data-theme="dark"] :is(.thread-column, .chat-conversation) { background: var(--mobile-canvas); }
-  :root[data-theme="dark"] .chat-message-list { background-image: linear-gradient(#101a14eb,#101a14eb),url('/eft-logo.jpg'); }
+  :root[data-theme="dark"] .chat-message-list { background-color: #101a14; }
   :root[data-theme="dark"] .message-bubble.outgoing, :root[data-theme="dark"] .chat-message.own { background: #294633; border-color: #47734d; color: var(--mobile-ink); }
 }

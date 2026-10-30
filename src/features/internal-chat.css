@@ -24,7 +24,7 @@
 .chat-conversation-head strong{font-size:16px}.chat-conversation-head span{font-size:11px;color:var(--muted);margin-top:3px}
 .chat-push-status{display:flex;align-items:center;gap:6px;margin:0;padding:7px 16px;border-bottom:1px solid var(--line);background:var(--surface,#fff);color:var(--muted);font-size:11px;line-height:1.4}
 .chat-context-link{font-size:11px;padding-inline:9px;min-height:34px}.chat-conversation-head .chat-back{display:none}
-.chat-message-list{display:flex;flex:1;flex-direction:column;gap:10px;overflow:auto;min-height:0;padding:18px;overscroll-behavior:contain;background-image:linear-gradient(#f6f9f7ee,#f6f9f7ee),url('/eft-logo.jpg');background-position:center;background-size:cover,190px auto;background-repeat:no-repeat}
+.chat-message-list{display:flex;flex:1;flex-direction:column;gap:10px;overflow:auto;min-height:0;padding:18px;overscroll-behavior:contain;background-color:#f6f9f7;background-image:url('/chat-logo-pattern.svg');background-repeat:repeat;background-size:760px 600px}
 .chat-message{align-self:flex-start;max-width:min(78%,620px);padding:11px 13px;border:1px solid #dce7e1;border-radius:10px 10px 10px 3px;background:#fff;box-shadow:0 2px 6px #1b39220b;overflow-wrap:anywhere}
 .chat-message.own{align-self:flex-end;border-color:#c6dfc1;border-radius:10px 10px 3px 10px;background:#e9f5e5}
 .chat-message strong{display:block;margin-bottom:4px;font-size:11px;color:#4d7847}
@@ -71,7 +71,7 @@
 :root[data-theme="dark"] .chat-thread-item:hover,:root[data-theme="dark"] .chat-thread-item.active{background:#22372d}
 :root[data-theme="dark"] .chat-thread-copy strong,:root[data-theme="dark"] .chat-empty-conversation strong{color:#e4efe5}
 :root[data-theme="dark"] .chat-conversation{background:#18231c}:root[data-theme="dark"] .chat-message{background:#27372c;color:#e7efe8;border-color:#3d5543}:root[data-theme="dark"] .chat-message.own{background:#315239}
-:root[data-theme="dark"] .chat-message-list{background-image:linear-gradient(#18231cf0,#18231cf0),url('/eft-logo.jpg')}
+:root[data-theme="dark"] .chat-message-list{background-color:#18231c;background-image:url('/chat-logo-pattern-dark.svg')}
 @media(min-width:761px) and (max-width:900px){.internal-chat-page{height:calc(100dvh - 124px - env(safe-area-inset-bottom))}}
 @media(max-width:760px){
   .internal-chat-page{display:block;height:auto}
