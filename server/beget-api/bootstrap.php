@@ -820,8 +820,10 @@ function crm_connector_statuses(): array {
         $detail = $ready ? ($id === 'email' && (string)($config['imap_host'] ?? '') !== '' && (string)($config['imap_password'] ?? '') !== '' ? 'Отправка и приём настроены' : (in_array($id, ['telegram', 'max'], true) ? 'Бот' . ((string)($config['bot_username'] ?? '') !== '' ? ' @' . (string)$config['bot_username'] : '') . ' подключён' : 'Отправка настроена')) : ($enabled ? 'Не хватает параметров' : 'Ожидает настройки');
         if ($id === 'max' && $ready) $detail = 'Токен сохранён · привязано диалогов: ' . count((array)($config['site_chat_ids'] ?? []));
         if ($id === 'avito' && $ready) $detail = 'Профиль ' . $config['account_id'] . ' · привязано диалогов: ' . count((array)($config['chat_site_ids'] ?? []));
+        $linkedSites = in_array($id,['telegram','max','avito'],true) ? array_keys((array)($config['site_chat_ids'] ?? [])) : [];
+        if (in_array($id,['max','avito'],true)) { $q=crm_db()->prepare('SELECT DISTINCT site_id FROM crm_communications WHERE channel=? AND site_id IS NOT NULL');$q->execute([$id]);$linkedSites=array_values(array_unique([...$linkedSites,...$q->fetchAll(PDO::FETCH_COLUMN)])); }
         $result[] = ['id' => $id, 'name' => $definition['name'], 'status' => $ready ? 'active' : ($enabled ? 'error' : 'pending'), 'detail' => $detail,
-            'linkedSiteIds' => in_array($id, ['telegram', 'max', 'avito'], true) && is_array($config['site_chat_ids'] ?? null) ? array_keys($config['site_chat_ids']) : []];
+            'linkedSiteIds' => $linkedSites];
     }
     return $result;
 }
