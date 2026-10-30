@@ -136,3 +136,6 @@
 :root[data-theme="dark"] .communications-page :is(.dialog-thread-identity strong,.conversation-copy strong,.conversation-copy span,.dialog-channel-bar button){color:#fff}
 .message-files a{display:flex;align-items:center;gap:9px;padding:11px 13px;border:1px solid var(--line);border-radius:8px;min-height:46px;overflow-wrap:anywhere}
 .message-files a svg:first-child{width:24px;height:24px;flex:none}
+
+:root[data-theme="dark"] .communications-page :is(.unassigned-link-bar,.communication-assistant,.communication-batch,.connector-panel){background:#121212;color:#fff;border-color:#393939}
+:root[data-theme="dark"] .communications-page .unassigned-link-bar strong{color:#fff}
