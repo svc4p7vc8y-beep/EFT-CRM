@@ -125,3 +125,14 @@
   .communications-page .unassigned-composer-row .attach-button{width:42px}
   .communications-page .unassigned-composer-row .primary{width:100%}
 }
+
+:root[data-theme="dark"] .communications-page{--dialog-surface:#121212;--dialog-soft:#222;--dialog-thread:#000;--dialog-ink:#fff;--dialog-subtle:#c5c5c5}
+:root[data-theme="dark"] :is(.message-thread,.lead-chat-list,.chat-message-list){background:#000!important;color:#fff}
+:root[data-theme="dark"] :is(.message-bubble,.lead-chat-bubble,.chat-message){background:#181818!important;color:#fff!important;border-color:#393939}
+:root[data-theme="dark"] :is(.message-bubble.outgoing,.lead-chat-list li.own .lead-chat-bubble,.chat-message.own){background:#17352a!important;color:#fff!important}
+:root[data-theme="dark"] :is(.message-bubble,.lead-chat-bubble,.chat-message) :is(p,strong,header,span){color:#fff}
+:root[data-theme="dark"] :is(.message-bubble,.lead-chat-bubble,.chat-message) :is(time,small,footer){color:#c5c5c5}
+:root[data-theme="dark"] :is(.message-files a,.lead-message-files button){background:#242424;color:#fff;border-color:#484848}
+:root[data-theme="dark"] .communications-page :is(.dialog-thread-identity strong,.conversation-copy strong,.conversation-copy span,.dialog-channel-bar button){color:#fff}
+.message-files a{display:flex;align-items:center;gap:9px;padding:11px 13px;border:1px solid var(--line);border-radius:8px;min-height:46px;overflow-wrap:anywhere}
+.message-files a svg:first-child{width:24px;height:24px;flex:none}

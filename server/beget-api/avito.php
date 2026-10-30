@@ -43,18 +43,63 @@ function crm_avito_chat_metadata(array $chat, string $accountId): array {
     return ['sender'=>$name,'adTitle'=>crm_text($ad['title'] ?? '',200),'adUrl'=>$url,'itemId'=>crm_text($ad['id'] ?? '',30)];
 }
 
+function crm_avito_media(array $content): array {
+    $sources = [];
+    foreach (['file', 'document', 'video', 'audio'] as $kind) {
+        $file = $content[$kind] ?? null;
+        if (is_array($file) && is_string($file['url'] ?? $file['link'] ?? null)) $sources[] = ['url'=>$file['url'] ?? $file['link'], 'name'=>$file['name'] ?? $file['filename'] ?? 'Файл из Авито'];
+    }
+    $sizes = $content['image']['sizes'] ?? [];
+    if (is_array($sizes) && $sizes) {
+        uksort($sizes, static fn($a,$b) => (int)explode('x',(string)$b)[0] <=> (int)explode('x',(string)$a)[0]);
+        foreach ($sizes as $url) if (is_string($url)) { $sources[]=['url'=>$url,'name'=>'Фото из Авито']; break; }
+    }
+    $result = [];
+    foreach (array_slice($sources,0,8) as $source) {
+        $parts = parse_url($source['url']); $host = strtolower((string)($parts['host'] ?? ''));
+        if (($parts['scheme'] ?? '') !== 'https' || !preg_match('/(^|\.)(avito\.ru|avito\.st|avito\.net)$/', $host) || isset($parts['user']) || isset($parts['pass']) || (isset($parts['port']) && $parts['port'] !== 443)) continue;
+        $directory = dirname(__DIR__).'/uploads/communications';
+        if (!is_dir($directory) && !mkdir($directory,0770,true) && !is_dir($directory)) continue;
+        $temporary = tempnam($directory,'avito-'); if ($temporary === false) continue;
+        $stream = fopen($temporary,'wb'); if ($stream === false) { unlink($temporary); continue; }
+        $size=0; $curl=curl_init($source['url']);
+        curl_setopt_array($curl,[CURLOPT_FOLLOWLOCATION=>false,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>20,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_WRITEFUNCTION=>static function($handle,string $chunk) use($stream,&$size):int { if ($size+strlen($chunk)>25*1024*1024) return 0; $written=fwrite($stream,$chunk); $size+=(int)$written; return (int)$written; }]);
+        curl_exec($curl); $status=(int)curl_getinfo($curl,CURLINFO_RESPONSE_CODE); curl_close($curl); fclose($stream);
+        $mime=(new finfo(FILEINFO_MIME_TYPE))->file($temporary);
+        $extensions=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx'];
+        if ($status!==200 || !$size || !isset($extensions[$mime])) { unlink($temporary); continue; }
+        $key='m-'.bin2hex(random_bytes(16)).'.'.$extensions[$mime];
+        if (!rename($temporary,$directory.'/'.$key)) { unlink($temporary); continue; }
+        $result[]=['kind'=>'avito_media','key'=>$key,'name'=>crm_text($source['name'],220),'mime'=>$mime,'size'=>$size,'url'=>'/api/api.php?action=communications.file&key='.rawurlencode($key)];
+    }
+    return $result;
+}
+
 function crm_avito_import_message(array $config, string $chatId, array $message, array $metadata = []): bool {
     $id = (string)($message['id'] ?? '');
     if ($id === '' || strlen($id) > 200 || !preg_match('/^[A-Za-z0-9_-]+$/',$id)) return false;
+    $existingQuery=crm_db()->prepare('SELECT id,attachments_json FROM crm_communications WHERE external_key=? LIMIT 1');
+    $existingQuery->execute(['avito-'.$id]); $existing=$existingQuery->fetch();
+    $oldEntries=$existing ? (json_decode((string)$existing['attachments_json'],true) ?: []) : [];
+    if ($existing && array_filter($oldEntries,static fn($entry)=>($entry['kind'] ?? '')==='avito_media')) return false;
     $direction = ($message['direction'] ?? 'in') === 'out' ? 'outgoing' : 'incoming';
     $content = is_array($message['content'] ?? null) ? $message['content'] : [];
     $kind = (string)($message['type'] ?? 'text');
     $body = trim((string)($content['text'] ?? $content['link']['text'] ?? $content['item']['title'] ?? ''));
     if ($body === '') $body = match ($kind) { 'image'=>'Фото в Авито','voice'=>'Голосовое сообщение в Авито','call'=>'Звонок через Авито','deleted'=>'Сообщение удалено','system'=>'Системное сообщение Авито',default=>'Сообщение в Авито' };
     $body = crm_text($body,20000);
+    $media=crm_avito_media($content);
+    if ($existing) {
+        if (!$media) return false;
+        $update=crm_db()->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?');
+        $update->execute([json_encode([...$oldEntries,...$media],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$existing['id']]);
+        return true;
+    }
     $sender = (string)($metadata['sender'] ?? 'Собеседник Авито');
     $attachments = [['kind'=>'avito_chat','id'=>$chatId],['kind'=>'sender','name'=>$sender],['kind'=>'workflow','status'=>$direction==='incoming'?'reply':'waiting','followUpAt'=>'']];
     if (!empty($metadata['adTitle']) || !empty($metadata['adUrl'])) $attachments[] = ['kind'=>'avito_ad','title'=>(string)($metadata['adTitle'] ?? ''),'url'=>(string)($metadata['adUrl'] ?? ''),'itemId'=>(string)($metadata['itemId'] ?? '')];
+    $attachments = [...$attachments,...$media];
+    if (!$media && in_array($kind,['image','file','document','video','voice'],true)) $attachments[]=['kind'=>'avito_media_unavailable','name'=>'Вложение в Авито'];
     $siteId = (string)($config['chat_site_ids'][$chatId] ?? '');
     $site = null;
     if ($siteId !== '') { $check=crm_db()->prepare('SELECT id FROM crm_sites WHERE id=?'); $check->execute([$siteId]); $site=$check->fetchColumn() ?: null; }
