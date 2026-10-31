@@ -1,3 +1,4 @@
+import { ClientInfoBar } from '../components/ClientInfoBar.jsx';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, Download, ExternalLink, FileText, Image, Mail, MapPin, MessageSquare, Paperclip, Phone, Plus, Upload, UserRound, X } from 'lucide-react';
 import { Badge, Empty, VoiceInput } from '../components/UI.jsx';
@@ -108,6 +109,7 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
       <div className="client-header-actions">{client.phone ? <CallLink phone={client.phone} label="Позвонить" className="button" /> : null}<button className="button" onClick={onEditClient}>Контакты и объект</button><button className="button" onClick={onEditLead}>Редактировать заявку</button><button className="button" onClick={() => onChat?.(lead.id)}><MessageSquare size={16} />Чат по заявке</button></div>
     </header>
 
+    <ClientInfoBar state={state} lead={lead} site={site} client={client} files={files}/>
     <div className="client-progress" aria-label={`Прогресс заявки ${progress}%`}>
       <div><span>Прогресс работы с клиентом</span><strong>{progress}%</strong></div>
       <div className="client-progress-track"><i style={{ width: `${progress}%` }} /></div>
