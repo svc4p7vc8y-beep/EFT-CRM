@@ -194,7 +194,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $body = is_array($message['body'] ?? null) ? $message['body'] : [];
     $text = trim((string)($body['text'] ?? ''));
     $mid = (string)($body['mid'] ?? '');
-    $images = array_values(array_filter(is_array($body['attachments'] ?? null) ? $body['attachments'] : [], static fn($entry): bool => is_array($entry) && ($entry['type'] ?? '') === 'image'));
+    $images = array_values(array_filter(is_array($body['attachments'] ?? null) ? $body['attachments'] : [], static fn($entry): bool => is_array($entry) && in_array($entry['type'] ?? '', ['image','file'],true)));
     if (!preg_match('/^-?\d{1,20}$/', $chatId) || ($text === '' && !$images) || $mid === '') crm_json(['ok' => true]);
     $existing = crm_db()->prepare("SELECT 1 FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");
     $existing->execute([mb_substr($mid, 0, 255)]);
@@ -206,7 +206,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
     if ($siteId === false || !$siteId) $siteId=crm_external_conversation_site('max',$chatId,$sender,'Обращение из MAX');
     $metadataItems = [['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'max_chat', 'id' => $chatId], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']];
-    foreach (array_slice($images, 0, 12) as $image) $metadataItems[] = crm_max_image_attachment($image);
+    foreach (array_slice($images, 0, 12) as $image) $metadataItems[] = ($image['type'] ?? '') === 'file' ? crm_max_file_attachment($image) : crm_max_image_attachment($image);
     $target = (array)($config['chat_targets'][$chatId] ?? []);
     if (in_array($target['type'] ?? '', ['site', 'lead', 'order'], true) && (string)($target['id'] ?? '') !== '') $metadataItems[] = ['kind' => 'crm_link', 'entity' => $target['type'], 'id' => (string)$target['id']];
     $metadata = json_encode($metadataItems, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -1349,6 +1349,11 @@ if ($action === 'communications.attachment.upload' && $method === 'POST') {
     crm_json(['ok'=>true,'workspace'=>crm_workspace_for_user($user)]);
 }
 
+if ($action === 'communications.max.sync-files' && $method === 'POST') {
+    crm_require_origin();$user=crm_require_capability('integrations.manage');crm_csrf();crm_schema_ensure_v30();
+    $summary=crm_max_sync_files(crm_integration_config('max'));crm_json(['ok'=>true,'summary'=>$summary,'workspace'=>crm_workspace_for_user($user)]);
+}
+
 if ($action === 'communications.max.recover-images' && $method === 'POST') {
     crm_require_origin(); $user = crm_require_capability('integrations.manage'); crm_csrf(); crm_schema_ensure_v30();
     $input = crm_input();
@@ -1540,7 +1545,7 @@ if ($action === 'communications.send' && $method === 'POST') {
 
 if ($action === 'communications.file' && $method === 'GET') {
     $user = crm_user(); $key = (string)($_GET['key'] ?? '');
-    if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx)$/',$key)) { http_response_code(404); exit; }
+    if (!preg_match('/^m-[a-f0-9]{32}\.(jpg|png|webp|pdf|txt|zip|docx|xlsx|skp|dwg|dxf|ifc)$/',$key)) { http_response_code(404); exit; }
     $statement = crm_db()->prepare('SELECT site_id,channel,attachments_json FROM crm_communications WHERE attachments_json LIKE ? LIMIT 1'); $statement->execute(['%'.$key.'%']);
     $row = $statement->fetch(); if (!$row) { http_response_code(404); exit; }
     if (!$row['site_id'] && !crm_can($user,'integrations.manage') && !(($row['channel'] ?? '') === 'max' && crm_can_handle_unassigned($user, 'max'))) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Недостаточно прав.'],403);

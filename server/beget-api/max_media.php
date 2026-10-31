@@ -78,3 +78,75 @@ function crm_max_recover_images_for_row(array $row, array $config): array {
     }
     return ['recovered' => $recovered, 'remaining' => $remaining, 'changed' => $changed, 'failedHosts' => array_values(array_unique($failedHosts))];
 }
+
+function crm_max_file_attachment(array $attachment): array {
+    $fallback = ['kind'=>'max_file_unavailable','name'=>crm_text($attachment['filename'] ?? $attachment['payload']['filename'] ?? 'Файл из MAX',220)];
+    $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
+    $url = (string)($payload['url'] ?? '');
+    $parts = parse_url($url);
+    $host = strtolower((string)($parts['host'] ?? ''));
+    if (isset($parts['user']) || isset($parts['pass']) || (isset($parts['port']) && $parts['port']!==443)) return $fallback;
+    if (($parts['scheme'] ?? '') !== 'https' || !$host || !(preg_match('/(^|\.)oneme\.ru$/', $host) || preg_match('/(^|\.)max\.ru$/', $host)) || !function_exists('curl_init')) return $fallback;
+    $directory = dirname(__DIR__) . '/uploads/communications';
+    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) return $fallback;
+    $temporary = tempnam($directory, 'max-');
+    if ($temporary === false) return $fallback;
+    $stream = fopen($temporary, 'wb');
+    if ($stream === false) { unlink($temporary); return $fallback; }
+    $size = 0;
+    $curl = curl_init($url);
+    curl_setopt_array($curl, [CURLOPT_FOLLOWLOCATION => false, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 15, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+        CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use ($stream, &$size): int {
+            $length = strlen($chunk);
+            if ($size + $length > 50 * 1024 * 1024) return 0;
+            $written = fwrite($stream, $chunk); $size += (int)$written; return (int)$written;
+        }]);
+    curl_exec($curl);
+    $status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    fclose($stream);
+    if ($status !== 200 || $size === 0) { unlink($temporary); return $fallback; }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($temporary);
+    $name=crm_text($attachment['filename'] ?? $payload['filename'] ?? 'Файл из MAX',220);
+    $extensions=['application/pdf'=>'pdf','text/plain'=>'txt','application/zip'=>'zip','application/x-zip-compressed'=>'zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx','image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'];
+    $ext=strtolower(pathinfo($name,PATHINFO_EXTENSION));
+    if($mime==='application/octet-stream' && in_array($ext,['skp','dwg','dxf','ifc'],true))$extensions[$mime]=$ext;
+    if (!isset($extensions[$mime])) { unlink($temporary); return $fallback; }
+    $key = 'm-' . bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+    if (!rename($temporary, $directory . '/' . $key)) { unlink($temporary); return $fallback; }
+    return ['key' => $key, 'name' => $name, 'mime' => $mime, 'size' => $size, 'url' => '/api/api.php?action=communications.file&key=' . rawurlencode($key)];
+}
+
+
+function crm_max_sync_files(array $config): array {
+    $db=crm_db();$chats=[];
+    foreach((array)($config['site_chat_ids'] ?? []) as $siteId=>$chatId)$chats[(string)$chatId]=(string)$siteId;
+    foreach($db->query("SELECT site_id,attachments_json FROM crm_communications WHERE channel='max' ORDER BY occurred_at DESC LIMIT 1000")->fetchAll() as $row)foreach((array)json_decode((string)$row['attachments_json'],true) as $entry)if(($entry['kind'] ?? '')==='max_chat')$chats[(string)$entry['id']]=(string)($row['site_id'] ?? '');
+    $recovered=0;$failed=0;
+    foreach(array_slice($chats,0,30,true) as $chatId=>$siteId) {
+        if(!preg_match('/^-?\d{1,20}$/',(string)$chatId))continue;
+        $data=crm_http_get_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode((string)$chatId).'&count=100',['Authorization: '.$config['bot_token']]);
+        foreach((array)($data['messages'] ?? []) as $message) {
+            if(!is_array($message) || !empty($message['sender']['is_bot']))continue;
+            $body=(array)($message['body'] ?? []);$mid=(string)($body['mid'] ?? '');if($mid==='')continue;
+            $media=array_values(array_filter((array)($body['attachments'] ?? []),static fn($a)=>is_array($a)&&in_array($a['type'] ?? '',['file','image'],true)));if(!$media)continue;
+            $q=$db->prepare("SELECT id,site_id,attachments_json FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");$q->execute([$mid]);$existing=$q->fetch();
+            $entries=$existing?(json_decode((string)$existing['attachments_json'],true) ?: []):[];
+            if(count(array_filter($entries,static fn($a)=>!empty($a['key'])))>=count($media))continue;
+            $entries=array_values(array_filter($entries,static fn($a)=>!in_array($a['kind'] ?? '',['max_file_unavailable','max_image_unavailable'],true)));
+            $stored=count(array_filter($entries,static fn($a)=>!empty($a['key'])));
+            foreach(array_slice($media,$stored) as $a) {$file=($a['type'] ?? '')==='image'?crm_max_image_attachment($a):crm_max_file_attachment($a);$entries[]=$file;if(!empty($file['key']))$recovered++;else $failed++;}
+            $sender=crm_text($message['sender']['name'] ?? $message['sender']['first_name'] ?? 'Клиент MAX',100);
+            if($existing)$db->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?')->execute([json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$existing['id']]);
+            else {
+                $target=$siteId ?: crm_external_conversation_site('max',(string)$chatId,$sender,'Обращение из MAX');
+                $entries[]=['kind'=>'max_chat','id'=>(string)$chatId];$entries[]=['kind'=>'sender','name'=>$sender];
+                $id=crm_uuid();$time=(int)floor((float)($message['timestamp'] ?? 0)/1000);if($time<946684800||$time>time()+86400)$time=time();
+                $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,activity_type,channel,direction,external_key,body,is_read,attachments_json,delivery_status,occurred_at) VALUES (?,?,'message','max','incoming',?,?,0,?,'delivered',?)")->execute([$id,$target,$mid,crm_text($body['text'] ?? 'Файл из MAX',20000),json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),date('Y-m-d H:i:s',$time)]);
+                if($db->query('SELECT ROW_COUNT()')->fetchColumn())crm_push_notify_site($target,$id);
+            }
+        }
+    }
+    $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    return ['recovered'=>$recovered,'failed'=>$failed];
+}

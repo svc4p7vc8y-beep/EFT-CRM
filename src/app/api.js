@@ -143,6 +143,7 @@ export const crmApi = {
   uploadCommunicationAttachment: (messageId, file) => { const body=new FormData();body.append('messageId',messageId);body.append('files[]',file);return request('communications.attachment.upload',{method:'POST',body}); },
   loadAvitoGreeting: () => request('connectors.avito.greeting'),
   saveAvitoGreeting: (settings) => request('connectors.avito.greeting',{method:'POST',body:settings}),
+  syncMaxFiles: () => request('communications.max.sync-files',{method:'POST',body:{}}),
   recoverMaxImages: (messageId) => request('communications.max.recover-images', { method: 'POST', body: { messageId } }),
   batchCommunications: (messageIds, operation, siteId = '') => request('communications.batch', { method: 'POST', body: { messageIds, operation, siteId } }),
   updateCommunicationWorkflow: (messageId, status, followUpAt = '') => request('communications.workflow', { method: 'POST', body: { messageId, status, followUpAt } }),
