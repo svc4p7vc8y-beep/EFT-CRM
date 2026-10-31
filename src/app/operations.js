@@ -1,6 +1,6 @@
 import catalog from '../data/calculator-catalog.json' with { type: 'json' };
 
-export const RELEASE = 99;
+export const RELEASE = 100;
 export function nextToolInventoryNumber(tools) {
   const used = new Set(tools.map((tool) => String(tool.serial || '').trim()));
   const highest = [...used].reduce((max, serial) => /^\d+$/.test(serial) ? Math.max(max, Number(serial)) : max, 0);
