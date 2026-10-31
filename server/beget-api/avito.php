@@ -43,6 +43,27 @@ function crm_avito_chat_metadata(array $chat, string $accountId): array {
     return ['sender'=>$name,'adTitle'=>crm_text($ad['title'] ?? '',200),'adUrl'=>$url,'itemId'=>crm_text($ad['id'] ?? '',30)];
 }
 
+function crm_avito_refresh_contact(string $siteId,array $meta,string $chatId): bool {
+    if($siteId==='')return false;
+    $db=crm_db();$changed=false;$sender=trim((string)($meta['sender'] ?? ''));$title=trim((string)($meta['adTitle'] ?? ''));
+    if($sender!=='' && !in_array($sender,['Клиент Авито','Собеседник Авито','Авито'],true)) {
+        $q=$db->prepare("UPDATE crm_clients c JOIN crm_sites s ON s.client_id=c.id SET c.display_name=? WHERE s.id=? AND c.display_name IN ('Клиент Авито','Собеседник Авито','Авито','')");$q->execute([$sender,$siteId]);$changed=$changed || $q->rowCount()>0;
+    }
+    if($title!=='') {$q=$db->prepare("UPDATE crm_sites SET name=? WHERE id=? AND name IN ('Обращение из Авито','Обращение из Авито ','')");$q->execute([$title,$siteId]);$changed=$changed || $q->rowCount()>0;}
+    $q=$db->prepare("SELECT id,direction,subject,attachments_json FROM crm_communications WHERE site_id=? AND channel='avito' AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind','avito_chat','id',?))");$q->execute([$siteId,$chatId]);
+    foreach($q->fetchAll() as $row) {
+        $entries=json_decode((string)$row['attachments_json'],true) ?: []; $updated=false;$hasAd=false;
+        foreach($entries as &$entry) {
+            if(($entry['kind'] ?? '')==='sender' && $row['direction']==='incoming' && $sender!=='' && in_array($entry['name'] ?? '',['','Клиент Авито','Собеседник Авито','Авито'],true) && ($entry['name'] ?? '')!==$sender) {$entry['name']=$sender;$updated=true;}
+            if(($entry['kind'] ?? '')==='avito_ad')$hasAd=true;
+        } unset($entry);
+        if(!$hasAd && $title!=='') {$entries[]=['kind'=>'avito_ad','title'=>$title,'url'=>$meta['adUrl'] ?? '','itemId'=>$meta['itemId'] ?? ''];$updated=true;}
+        $subject=$row['subject'] ?: $title;
+        if($updated || $subject!==$row['subject']) {$update=$db->prepare('UPDATE crm_communications SET attachments_json=?,subject=? WHERE id=?');$update->execute([json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$subject,$row['id']]);$changed=true;}
+    }
+    return $changed;
+}
+
 function crm_avito_media(array $content): array {
     $sources = [];
     foreach (['file', 'document', 'video', 'audio'] as $kind) {
@@ -127,11 +148,13 @@ function crm_avito_sync(array $config, int $chatLimit = 30): array {
     $token=crm_avito_token($config);
     $list=crm_avito_request($token,'GET','/messenger/v2/accounts/'.$accountId.'/chats?limit='.$chatLimit.'&offset=0');
     $chats=is_array($list['chats'] ?? null) ? $list['chats'] : [];
-    $imported=0; $processed=0; $metadataMap=is_array($config['chat_metadata'] ?? null)?$config['chat_metadata']:[];
+    $contactUpdates=0; $imported=0; $processed=0; $metadataMap=is_array($config['chat_metadata'] ?? null)?$config['chat_metadata']:[];
     foreach ($chats as $chat) {
         if (!is_array($chat)) continue;
         try { $chatId=crm_avito_chat_id((string)($chat['id'] ?? '')); } catch (Throwable) { continue; }
         $meta=crm_avito_chat_metadata($chat,$accountId); $metadataMap[$chatId]=$meta;
+        $siteId=(string)($config['chat_site_ids'][$chatId] ?? '') ?: crm_external_conversation_site('avito',$chatId,$meta['sender'],$meta['adTitle']);
+        if(crm_avito_refresh_contact($siteId,$meta,$chatId))$contactUpdates++;
         $messages=crm_avito_request($token,'GET','/messenger/v3/accounts/'.$accountId.'/chats/'.rawurlencode($chatId).'/messages/?limit=100&offset=0');
         if (!array_is_list($messages)) $messages=$messages['messages'] ?? [];
         if (!is_array($messages)) $messages=[];
@@ -140,8 +163,8 @@ function crm_avito_sync(array $config, int $chatLimit = 30): array {
     }
     $config['chat_metadata']=array_slice($metadataMap,-500,null,true);
     crm_store_private_integration('avito',$config);
-    if ($imported) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
-    return ['chats'=>$processed,'imported'=>$imported];
+    if ($imported || $contactUpdates) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    return ['chats'=>$processed,'imported'=>$imported,'contactsUpdated'=>$contactUpdates];
 }
 
 function crm_avito_send(array $config, string $chatId, string $text): array {

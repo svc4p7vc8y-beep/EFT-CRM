@@ -64,6 +64,16 @@ if ($action === 'connectors.avito.webhook' && $method === 'POST') {
         $message['direction']=(string)($message['author_id'] ?? '')===(string)$config['account_id']?'out':'in';
         crm_schema_ensure_v30();
         $meta=(array)($config['chat_metadata'][$chatId] ?? []);
+        if(empty($meta['sender']) || in_array($meta['sender'],['Клиент Авито','Собеседник Авито'],true) || empty($meta['adTitle'])) {
+            try {
+                $token=crm_avito_token($config);
+                $chat=crm_avito_request($token,'GET','/messenger/v2/accounts/'.rawurlencode((string)$config['account_id']).'/chats/'.rawurlencode($chatId));
+                $meta=crm_avito_chat_metadata($chat,(string)$config['account_id']);
+            } catch(Throwable $error) {error_log('EFT CRM Avito contact lookup failed');}
+        }
+        $siteId=(string)($config['chat_site_ids'][$chatId] ?? '') ?: crm_external_conversation_site('avito',$chatId,(string)($meta['sender'] ?? 'Клиент Авито'),(string)($meta['adTitle'] ?? ''));
+        if(crm_avito_refresh_contact($siteId,$meta,$chatId)) crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+
         $inserted=crm_avito_import_message($config,$chatId,$message,$meta);
         if ($inserted) {
             crm_avito_greet_new_chat($config,$chatId,$message,$meta);
