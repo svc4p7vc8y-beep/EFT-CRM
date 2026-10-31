@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, Eraser, FolderInput, PenLine, Send, Share2, X } from 'lucide-react';
 import { crmApi } from '../app/api.js';
+import {documentMime,isDocumentImage,decodeDocumentImage} from './document-media.js';
 import './document-viewer.css';
 
 export function openDocument(document) {
   window.dispatchEvent(new CustomEvent('eft:open-document', { detail: document }));
 }
 
-const isImage = (item) => item?.mime?.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item?.name || '');
+const isImage = isDocumentImage;
 const isPdf = (item) => item?.mime === 'application/pdf' || /\.pdf$/i.test(item?.name || '');
 
 export function DocumentViewer({ sites = [], liveSession, canSend, canManageFiles, sendCommunication, notify }) {
@@ -82,14 +83,14 @@ export function DocumentViewer({ sites = [], liveSession, canSend, canManageFile
           canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
           await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
         } else {
-          const bitmap = await createImageBitmap(blob);
-          if (cancelled || token !== openRef.current) { bitmap.close(); return; }
+          const bitmap = await decodeDocumentImage(blob,documentMime(item));
+          if (cancelled || token !== openRef.current) { bitmap.close?.(); return; }
           const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
           canvas.width = Math.max(1, Math.round(bitmap.width * scale));
           canvas.height = Math.max(1, Math.round(bitmap.height * scale));
           const context = canvas.getContext('2d');
           context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-          bitmap.close();
+          bitmap.close?.();
         }
         baseRef.current = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
         if (isPdf(item)) {
@@ -121,7 +122,7 @@ export function DocumentViewer({ sites = [], liveSession, canSend, canManageFile
       if (isPdf(item) && workingPdfRef.current) return workingPdfRef.current;
       const response = await fetch(item.url, { credentials: 'include' });
       if (!response.ok) throw new Error('Не удалось прочитать исходный файл.');
-      return new File([await response.blob()], item.name || 'document', { type: item.mime || response.headers.get('content-type') || 'application/octet-stream' });
+      return new File([await response.blob()], item.name || 'document', { type: documentMime(item) || response.headers.get('content-type') || 'application/octet-stream' });
     }
     if (isPdf(item)) {
       const [{ PDFDocument }, source] = await Promise.all([import('pdf-lib'), sourceRef.current?.arrayBuffer()]);

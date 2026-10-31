@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileText, FolderOpen, RefreshCw, Upload } from 'lucide-react';
 import { crmApi } from '../app/api.js';
 import { openDocument } from '../components/DocumentViewer.jsx';
+import {isDocumentImage} from '../components/document-media.js';
 import './shared-files.css';
 
 const CALC_API = 'https://eftsip.ru/api/api.php';
@@ -83,6 +84,6 @@ export function SharedFiles({ liveSession, localAttachments = [] }) {
     {liveSession && oldFiles.length ? <div className="shared-files-info"><FolderOpen size={20}/><span>{oldFiles.length} файлов сохранено только в этом браузере. Перенесите их на сервер, чтобы видеть в калькуляторе.</span><button className="button" disabled={uploading} onClick={migrateOldFiles}>Перенести</button></div> : null}
     {error ? <p className="shared-files-error" role="alert">{error}</p> : null}
     <input className="shared-files-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти файл, объект или папку" aria-label="Поиск файлов" />
-    <div className="shared-files-list">{visible.map((file) => <a key={file.id} href={file.href} className="shared-file" onClick={(event) => { event.preventDefault(); openDocument({ url: file.href, downloadUrl: file.downloadUrl || file.href, name: file.name, mime: file.mime, siteId: file.siteId, sharedFileId: file.sharedFileId }); }}><FileText size={20}/><span><strong>{file.name}</strong><small>{file.source} · {file.detail} · {sizeLabel(file.size)} · {dateLabel(file.createdAt)}</small></span><Download size={17}/></a>)}{!loading && !visible.length ? <p>Файлов пока нет.</p> : null}{loading ? <p>Загружаем файлы…</p> : null}</div>
+    <div className="shared-files-list">{visible.map((file) => <a key={file.id} href={file.href} className="shared-file" onClick={(event) => { event.preventDefault(); openDocument({ url: file.href, downloadUrl: file.downloadUrl || file.href, name: file.name, mime: file.mime, siteId: file.siteId, sharedFileId: file.sharedFileId }); }}>{isDocumentImage(file)?<img className="shared-file-thumbnail" src={file.href} alt="" loading="lazy" onError={event=>{event.currentTarget.hidden=true;}}/>:<FileText size={20}/>}<span><strong>{file.name}</strong><small>{file.source} · {file.detail} · {sizeLabel(file.size)} · {dateLabel(file.createdAt)}</small></span><Download size={17}/></a>)}{!loading && !visible.length ? <p>Файлов пока нет.</p> : null}{loading ? <p>Загружаем файлы…</p> : null}</div>
   </section>;
 }
