@@ -141,3 +141,14 @@
 :root[data-theme="dark"] .communications-page .unassigned-link-bar strong{color:#fff}
 
 .avito-document-card{display:flex;gap:12px;align-items:flex-start;padding:12px;margin-block:10px;border:1px solid var(--line);border-radius:8px}.avito-document-card>svg{flex:none}.avito-document-card p{margin:5px 0;font-size:12px}.avito-document-card a{display:block;color:var(--teal);margin:8px 0}.avito-document-card .button{font-size:12px;cursor:pointer}
+
+.compose-destination{grid-column:1/-1;display:block;font-weight:700;font-size:12px;padding:8px 10px;border-radius:6px;background:#edf4f1;color:#34594a}
+.external-compose{border:2px solid #c83a40!important;border-radius:9px;background:#fff4f4!important;padding:10px!important}
+.external-compose .compose-destination{color:#9d2029;background:#ffe0e2}
+.external-compose textarea{border:2px solid #c83a40!important;background:#fffafa!important;color:#51151b!important}
+.external-compose .button.primary{background:#b72d39!important;border-color:#b72d39!important;color:#fff!important}
+.external-compose textarea:focus{outline:2px solid #e8868b;outline-offset:2px}
+:root[data-theme="dark"] .external-compose{background:#240f13!important}
+:root[data-theme="dark"] .external-compose .compose-destination{background:#501e27;color:#ffdce0}
+:root[data-theme="dark"] .external-compose textarea{background:#1c1013!important;color:#fff!important}
+:root[data-theme="dark"] .internal-compose .compose-destination{background:#20362d;color:#d3e8da}

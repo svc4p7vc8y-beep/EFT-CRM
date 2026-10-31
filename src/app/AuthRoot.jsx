@@ -171,6 +171,8 @@ export function AuthRoot() {
     assignCommunication: async (messageId, targetType, targetId) => { const result = await crmApi.assignCommunication(messageId, targetType, targetId); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     replyUnassigned: async (messageId, text, subject, files) => { const result = await crmApi.replyUnassigned(messageId, text, subject, files); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     ignoreCommunication: async (messageId, ignored) => { const result = await crmApi.ignoreCommunication(messageId, ignored); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
+    loadAvitoGreeting: crmApi.loadAvitoGreeting,
+    saveAvitoGreeting: crmApi.saveAvitoGreeting,
     uploadCommunicationAttachment: crmApi.uploadCommunicationAttachment,
     recoverMaxImages: async (messageId) => { const result = await crmApi.recoverMaxImages(messageId); setAuth((current) => current.status === 'ready' ? { ...current, workspace: { ...current.workspace, ...result.workspace } } : current); return result; },
     batchCommunications: async (messageIds, operation, siteId) => { const result = await crmApi.batchCommunications(messageIds, operation, siteId); updateWorkspace(result.workspace); return result; },

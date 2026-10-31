@@ -152,3 +152,23 @@ function crm_avito_send(array $config, string $chatId, string $text): array {
     $token=crm_avito_token($config);
     return crm_avito_request($token,'POST','/messenger/v1/accounts/'.$accountId.'/chats/'.rawurlencode($chatId).'/messages',['type'=>'text','message'=>['text'=>$text]]);
 }
+
+function crm_avito_greeting_settings(): array {
+    $q=crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key=?');$q->execute(['avito_greeting_settings']);$stored=json_decode((string)$q->fetchColumn(),true);
+    return is_array($stored)?$stored:['enabled'=>false,'text'=>'Здравствуйте! Спасибо за обращение в ЭФТ. Чтобы подготовить расчёт, заполните короткую анкету: https://eftsip.ru/EFT_client_questionnaire.html . Если удобнее, опишите задачу прямо здесь — мы поможем.'];
+}
+function crm_avito_greet_new_chat(array $config,string $chatId,array $message,array $meta): void {
+    $settings=crm_avito_greeting_settings();
+    if(empty($settings['enabled']) || ($message['type'] ?? '')==='system' || ($message['direction'] ?? 'in')==='out' || abs(time()-(int)($message['created'] ?? 0))>300) return;
+    $db=crm_db();$q=$db->prepare("SELECT id,site_id,direction FROM crm_communications WHERE channel='avito' AND body NOT LIKE '[Системное сообщение]%' AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind','avito_chat','id',?)) ORDER BY occurred_at LIMIT 2");$q->execute([$chatId]);$rows=$q->fetchAll();
+    if(count($rows)!==1 || $rows[0]['direction']!=='incoming') return;
+    $claim='avito-greeting:'.substr(hash('sha256',$chatId),0,40);
+    $q=$db->prepare('INSERT IGNORE INTO crm_settings (setting_key,setting_value) VALUES (?,?)');$q->execute([$claim,'sending']);if(!$q->rowCount())return;
+    $text=(string)$settings['text'];$status='sent';$error='';$external=$claim;
+    try { $sent=crm_avito_send($config,$chatId,$text);$external=!empty($sent['id'])?'avito-'.$sent['id']:$claim; }
+    catch(Throwable $failure) { $status='error';$error=crm_text($failure->getMessage(),1000); }
+    $entries=[['kind'=>'avito_chat','id'=>$chatId],['kind'=>'auto_greeting'],['kind'=>'sender','name'=>'ЭФТ']];
+    $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at) VALUES (?,?,'message','avito','outgoing',?,'Приветствие ЭФТ',?,1,?,?,?,NOW())")->execute([crm_uuid(),$rows[0]['site_id'],$external,$text,json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$status,$error]);
+    $db->prepare('UPDATE crm_settings SET setting_value=? WHERE setting_key=?')->execute([$status,$claim]);
+    $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+}

@@ -44,3 +44,5 @@
 .task-assignee-names .avatar{width:23px;height:23px}
 @media(max-width:600px){.lead-chat-bubble{max-width:95%}.lead-checklist .inline-form{flex-wrap:wrap}.lead-checklist .inline-form .button{width:100%}.quick-communication.lead-chat-compose>.voice-field-control{grid-column:1/-1}.quick-communication.lead-chat-compose>.button{min-width:0;padding-inline:10px}.quick-communication.lead-chat-compose>.lead-chat-attach{grid-column:2}.quick-communication.lead-chat-compose>.button.primary{grid-column:3}}
 .attachment-grid button.attachment-card{width:100%;background:transparent;text-align:left;cursor:pointer;font:inherit}
+
+.lead-summary{display:grid;gap:4px;margin-top:7px;max-width:440px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}.lead-last-message{display:grid;gap:3px;padding:7px 9px;background:#eff5f2;border-radius:5px;color:#304d41}.lead-last-message b{font-size:10px;color:var(--muted)}:root[data-theme="dark"] .lead-last-message{background:#20312a;color:#e7f3ec}

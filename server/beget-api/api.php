@@ -27,6 +27,17 @@ if ($action === 'health' && $method === 'GET') {
     crm_json(['ok' => true, 'service' => 'eft-crm-api', 'time' => gmdate('c')]);
 }
 
+if ($action === 'connectors.avito.greeting' && in_array($method,['GET','POST'],true)) {
+    $user=crm_require_capability('integrations.manage');
+    if($method==='POST') {
+        crm_require_origin();crm_csrf();$input=crm_input(8192);$text=crm_required_text($input['text'] ?? '', 'текст приветствия',1000);
+        $settings=['enabled'=>!empty($input['enabled']),'text'=>$text];
+        crm_db()->prepare('INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)')->execute(['avito_greeting_settings',json_encode($settings,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$user['id']]);
+        crm_audit((int)$user['id'],'avito.greeting.update','settings');
+    }
+    crm_json(['ok'=>true,'settings'=>crm_avito_greeting_settings()]);
+}
+
 if ($action === 'connectors.avito.media.inspect' && $method === 'GET') {
     crm_require_capability('integrations.manage');
     $config=crm_integration_config('avito'); $token=crm_avito_token($config); $chatId=crm_avito_chat_id((string)($_GET['chatId'] ?? ''));
@@ -55,6 +66,7 @@ if ($action === 'connectors.avito.webhook' && $method === 'POST') {
         $meta=(array)($config['chat_metadata'][$chatId] ?? []);
         $inserted=crm_avito_import_message($config,$chatId,$message,$meta);
         if ($inserted) {
+            crm_avito_greet_new_chat($config,$chatId,$message,$meta);
             crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
             try { crm_push_dispatch(2); } catch (Throwable $error) { error_log('EFT CRM Avito notification failed'); }
         }
