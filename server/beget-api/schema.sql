@@ -571,3 +571,14 @@ CREATE TABLE IF NOT EXISTS crm_task_questions (
   CONSTRAINT fk_crm_task_question_requester FOREIGN KEY (requester_user_id) REFERENCES crm_users(id),
   CONSTRAINT fk_crm_task_question_answerer FOREIGN KEY (answered_by_user_id) REFERENCES crm_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS crm_recycle_bin (
+ id CHAR(36) NOT NULL PRIMARY KEY, domain VARCHAR(20) NOT NULL, label VARCHAR(250) NOT NULL,
+ payload_json LONGTEXT NOT NULL, deleted_by BIGINT UNSIGNED NOT NULL, deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, restored_at DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS crm_client_visibility (
+ client_id CHAR(36) NOT NULL PRIMARY KEY, hidden_at DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS crm_site_aliases (
+ source_site_id CHAR(36) NOT NULL PRIMARY KEY, target_site_id CHAR(36) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -105,6 +105,7 @@ function crm_avito_import_message(array $config, string $chatId, array $message,
     $oldEntries=$existing ? (json_decode((string)$existing['attachments_json'],true) ?: []) : [];
     $mappedSite=(string)($config['chat_site_ids'][$chatId] ?? '');
     if ($mappedSite === '') $mappedSite=crm_external_conversation_site('avito',$chatId,(string)($metadata['sender'] ?? 'Клиент Авито'),(string)($metadata['adTitle'] ?? ''));
+    $mappedSite=crm_resolve_site($mappedSite);
     if ($existing && array_filter($oldEntries,static fn($entry)=>($entry['kind'] ?? '')==='avito_media')) return false;
     $direction = ($message['direction'] ?? 'in') === 'out' ? 'outgoing' : 'incoming';
     $content = is_array($message['content'] ?? null) ? $message['content'] : [];

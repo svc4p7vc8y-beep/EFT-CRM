@@ -46,3 +46,5 @@
 .attachment-grid button.attachment-card{width:100%;background:transparent;text-align:left;cursor:pointer;font:inherit}
 
 .lead-summary{display:grid;gap:4px;margin-top:7px;max-width:440px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}.lead-last-message{display:grid;gap:3px;padding:7px 9px;background:#eff5f2;border-radius:5px;color:#304d41}.lead-last-message b{font-size:10px;color:var(--muted)}:root[data-theme="dark"] .lead-last-message{background:#20312a;color:#e7f3ec}
+
+.client-row-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;font-size:11px}.client-row-actions details{max-width:280px}.client-row-actions summary{cursor:pointer;color:var(--teal)}.client-row-actions select{width:100%;margin:8px 0}.recycle-row{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.recycle-row small{display:block;color:var(--muted);margin-top:5px}

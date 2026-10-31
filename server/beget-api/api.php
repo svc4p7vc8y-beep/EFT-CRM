@@ -205,6 +205,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     crm_schema_ensure_v30();
     $sender = (string)($message['sender']['first_name'] ?? $message['sender']['name'] ?? 'MAX');
     if ($siteId === false || !$siteId) $siteId=crm_external_conversation_site('max',$chatId,$sender,'Обращение из MAX');
+    $siteId=crm_resolve_site((string)$siteId);
     $metadataItems = [['kind' => 'sender', 'name' => mb_substr($sender, 0, 100)], ['kind' => 'max_chat', 'id' => $chatId], ['kind' => 'workflow', 'status' => 'reply', 'followUpAt' => '']];
     foreach (array_slice($images, 0, 12) as $image) $metadataItems[] = ($image['type'] ?? '') === 'file' ? crm_max_file_attachment($image) : crm_max_image_attachment($image);
     $target = (array)($config['chat_targets'][$chatId] ?? []);
@@ -683,14 +684,24 @@ if ($action === 'clients.merge' && $method === 'POST') {
         $rows=[]; foreach ($query->fetchAll() as $row) $rows[$row['id']]=$row;
         if (!isset($rows[$targetId],$rows[$sourceId])) throw new RuntimeException('Один из клиентов не найден.');
         $email1=mb_strtolower(trim((string)$rows[$targetId]['email'])); $email2=mb_strtolower(trim((string)$rows[$sourceId]['email']));
-        if ($email1==='' || $email1!==$email2) throw new RuntimeException('Для объединения нужен одинаковый адрес электронной почты.');
-        $sourceNotes=trim((string)$rows[$sourceId]['notes']);
+
+        $sourceNotes=trim(implode(' · ',array_filter([$rows[$sourceId]['display_name'],$rows[$sourceId]['phone'],$rows[$sourceId]['email'],$rows[$sourceId]['source'],$rows[$sourceId]['notes']])));
         $mergedNotes=trim((string)$rows[$targetId]['notes'].($sourceNotes!==''?"\nОбъединено из «".$rows[$sourceId]['display_name']."»: ".$sourceNotes:''));
-        $db->prepare('UPDATE crm_clients SET phone=?, source=?, notes=? WHERE id=?')->execute([
+        $db->prepare('UPDATE crm_clients SET email=?, phone=?, source=?, notes=? WHERE id=?')->execute([
+            $email1!==''?$rows[$targetId]['email']:$rows[$sourceId]['email'],
             (string)$rows[$targetId]['phone']!==''?$rows[$targetId]['phone']:$rows[$sourceId]['phone'],
             (string)$rows[$targetId]['source']!==''?$rows[$targetId]['source']:$rows[$sourceId]['source'],
             $mergedNotes,$targetId,
         ]);
+        $q=$db->prepare('SELECT id FROM crm_sites WHERE client_id=? ORDER BY created_at,id');$q->execute([$targetId]);$primary=crm_resolve_site((string)$q->fetchColumn());
+        $q->execute([$sourceId]);$sources=$q->fetchAll(PDO::FETCH_COLUMN);
+        if($primary!=='')foreach($sources as $sourceSite) {
+            if($sourceSite===$primary)continue;
+            $db->prepare('INSERT INTO crm_site_aliases (source_site_id,target_site_id) VALUES (?,?) ON DUPLICATE KEY UPDATE target_site_id=VALUES(target_site_id)')->execute([$sourceSite,$primary]);
+            $db->prepare('UPDATE crm_communications SET site_id=? WHERE site_id=?')->execute([$primary,$sourceSite]);
+            $db->prepare('UPDATE crm_shared_files SET site_id=? WHERE site_id=?')->execute([$primary,$sourceSite]);
+        }
+        if($primary!=='')$db->prepare("INSERT INTO crm_communications (id,site_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,occurred_at) VALUES (?,?,'system','system','internal',?,'Объединение клиентов',?,1,'[]','internal',NOW())")->execute([$mergeId=crm_uuid(),$primary,$mergeId,'Объединены карточки «'.$rows[$sourceId]['display_name'].'» и «'.$rows[$targetId]['display_name'].'». Переписка Авито и MAX сохранена в общей ленте.']);
         $db->prepare('UPDATE crm_sites SET client_id=? WHERE client_id=?')->execute([$targetId,$sourceId]);
         $db->prepare('DELETE FROM crm_clients WHERE id=?')->execute([$sourceId]);
         $db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
@@ -711,10 +722,31 @@ if ($action === 'inventory.save' && $method === 'PUT') {
     crm_json(array_merge(['ok' => true], $inventory));
 }
 
+if ($action === 'clients.visibility' && $method === 'POST') {
+    crm_require_origin();$user=crm_require_capability('clients.manage');crm_csrf();crm_schema_ensure_v30();$input=crm_input();$id=crm_required_text($input['clientId'] ?? '', 'клиент',36);
+    $q=crm_db()->prepare('SELECT id FROM crm_clients WHERE id=?');$q->execute([$id]);if(!$q->fetchColumn())crm_json(['ok'=>false,'message'=>'Клиент не найден'],404);
+    crm_db()->prepare('INSERT INTO crm_client_visibility (client_id,hidden_at) VALUES (?,?) ON DUPLICATE KEY UPDATE hidden_at=VALUES(hidden_at)')->execute([$id,!empty($input['hidden'])?date('Y-m-d H:i:s'):null]);crm_db()->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key='workspace_revision'");
+    crm_json(['ok'=>true,'workspace'=>crm_workspace_for_user($user)]);
+}
+if ($action === 'deletion.mode' && $method === 'POST') {
+    crm_require_origin();$user=crm_require_capability('users.manage');crm_csrf();$input=crm_input();$required=!empty($input['required']);if($required&&!crm_deletion_configured())crm_json(['ok'=>false,'message'=>'Сначала создайте пароль удаления'],422);
+    crm_db()->prepare('INSERT INTO crm_settings (setting_key,setting_value,updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)')->execute(['deletion_password_required',$required?'1':'0',(int)$user['id']]);crm_json(['ok'=>true,'required'=>$required]);
+}
+if ($action === 'trash.list' && $method === 'GET') {
+    $user=crm_user();crm_schema_ensure_v30();$canCore=crm_can($user,'clients.manage');$canStock=crm_can($user,'procurement.manage');if(!$canCore&&!$canStock)crm_json(['ok'=>false,'message'=>'Нет прав'],403);
+    $rows=crm_db()->query('SELECT id,domain,label,deleted_at FROM crm_recycle_bin WHERE restored_at IS NULL ORDER BY deleted_at DESC LIMIT 500')->fetchAll();crm_json(['ok'=>true,'items'=>array_values(array_filter($rows,static fn($r)=>$r['domain']==='workspace'?$canCore:$canStock))]);
+}
+if ($action === 'trash.restore' && $method === 'POST') {
+    crm_require_origin();$user=crm_user();crm_csrf();crm_schema_ensure_v30();$input=crm_input();
+    try { crm_restore_recycled_record((string)($input['id'] ?? ''),$user);
+    } catch(Throwable $error) {crm_json(['ok'=>false,'message'=>'Восстановление не выполнено: проверьте связанные записи или совпадение идентификаторов.'],409);}
+    crm_json(array_merge(['ok'=>true,'workspace'=>crm_workspace_for_user($user)],crm_can($user,'procurement.manage')?['inventory'=>crm_public_inventory()]:[]));
+}
+
 if ($action === 'deletion.status' && $method === 'GET') {
     $user = crm_user();
     if (!in_array((string)$user['role'], ['owner','admin'], true)) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Настройка доступна владельцу и администратору.'], 403);
-    crm_json(['ok'=>true,'configured'=>crm_deletion_configured(),'unlockedUntil'=>(int)($_SESSION['deletion_unlocked_until'] ?? 0)]);
+    crm_json(['ok'=>true,'configured'=>crm_deletion_configured(),'required'=>crm_deletion_required(),'unlockedUntil'=>crm_deletion_required()?(int)($_SESSION['deletion_unlocked_until'] ?? 0):time()+86400]);
 }
 
 if ($action === 'deletion.unlock' && $method === 'POST') {
@@ -728,7 +760,7 @@ if ($action === 'deletion.unlock' && $method === 'POST') {
 if ($action === 'deletion.access' && $method === 'GET') {
     $user = crm_user();
     if (!crm_can($user, 'clients.manage') && !crm_can($user, 'procurement.manage') && !crm_can($user, 'tasks.manage')) crm_json(['ok'=>false,'code'=>'forbidden','message'=>'Нет права на удаление записей.'],403);
-    crm_json(['ok'=>true,'unlockedUntil'=>(int)($_SESSION['deletion_unlocked_until'] ?? 0)]);
+    crm_json(['ok'=>true,'unlockedUntil'=>crm_deletion_required()?(int)($_SESSION['deletion_unlocked_until'] ?? 0):time()+86400]);
 }
 
 if ($action === 'deletion.password.update' && $method === 'POST') {

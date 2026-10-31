@@ -138,6 +138,8 @@ function crm_push_notify_lead_activity(string $siteId, string $eventId, string $
 }
 
 function crm_push_notify_site(string $siteId, string $eventId): void {
+    $siteId=crm_resolve_site($siteId);
+    crm_db()->prepare("UPDATE crm_client_visibility v JOIN crm_sites s ON s.client_id=v.client_id JOIN crm_communications c ON c.id=? SET v.hidden_at=NULL WHERE s.id=? AND c.direction='incoming' AND c.occurred_at>=v.hidden_at")->execute([$eventId,$siteId]);
     if ($siteId === '') return;
     $lead = crm_db()->prepare('SELECT id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
     $lead->execute([$siteId]);

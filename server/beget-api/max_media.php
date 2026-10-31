@@ -144,7 +144,7 @@ function crm_max_sync_files(array $config): array {
         $data=crm_http_get_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode((string)$chatId).'&count=100',['Authorization: '.$config['bot_token']]);
         foreach((array)($data['messages'] ?? []) as $message) {
             if(!is_array($message) || !empty($message['sender']['is_bot']))continue;
-            $body=crm_max_message_body($message);$mid=(string)($body['mid'] ?? '');if($mid==='')continue;
+            $body=crm_max_message_body($message);if(trim((string)($body['text'] ?? ''))==='')$body['text']='Вложение из MAX';$mid=(string)($body['mid'] ?? '');if($mid==='')continue;
             $media=array_values(array_filter((array)($body['attachments'] ?? []),static fn($a)=>is_array($a)&&in_array($a['type'] ?? '',['file','image'],true)));if(!$media && empty($message['link']) && !array_filter((array)($body['attachments'] ?? []),static fn($a)=>($a['type'] ?? '')==='share'))continue;
             $q=$db->prepare("SELECT id,site_id,body,attachments_json FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");$q->execute([$mid]);$existing=$q->fetch();
             $entries=$existing?(json_decode((string)$existing['attachments_json'],true) ?: []):[];

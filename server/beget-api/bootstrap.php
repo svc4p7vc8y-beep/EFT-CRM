@@ -187,7 +187,9 @@ function crm_deletion_configured(): bool {
     return (bool)$query->fetchColumn();
 }
 
+function crm_deletion_required(): bool { $q=crm_db()->prepare('SELECT setting_value FROM crm_settings WHERE setting_key=?');$q->execute(['deletion_password_required']);return $q->fetchColumn()==='1'; }
 function crm_assert_deletion_password(string $password): void {
+    if (!crm_deletion_required()) return;
     if ($password === '' && !empty($_SESSION['deletion_unlocked_until']) && (int)$_SESSION['deletion_unlocked_until'] > time() && (int)($_SESSION['deletion_unlocked_user_id'] ?? 0) === (int)($_SESSION['user_id'] ?? 0)) return;
     $attempts = array_values(array_filter((array)($_SESSION['deletion_attempts'] ?? []), static fn($time): bool => is_int($time) && $time > time() - 900));
     if (count($attempts) >= 5) crm_json(['ok'=>false,'code'=>'too_many_attempts','message'=>'Слишком много попыток. Повторите через 15 минут.'], 429);
@@ -210,7 +212,17 @@ function crm_guard_removed_rows(PDO $db, array $groups, string $password): void 
         $submitted = array_fill_keys(array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $rows), true);
         foreach ($db->query("SELECT id FROM {$table}")->fetchAll(PDO::FETCH_COLUMN) as $id) if (!isset($submitted[(string)$id])) $removed[] = $table . ':' . $id;
     }
-    if ($removed) crm_assert_deletion_password($password);
+    if ($removed) {
+        crm_assert_deletion_password($password);$snapshot=[];$label='';
+        foreach($groups as $table=>$rows) {
+            $submitted=array_fill_keys(array_column($rows,'id'),true);
+            foreach($db->query("SELECT * FROM {$table}")->fetchAll() as $row) if(!isset($submitted[(string)$row['id']])) {$snapshot[$table][]=$row;if($label==='')$label=(string)($row['display_name'] ?? $row['title'] ?? $row['name'] ?? $row['id']);}
+        }
+        $bindings=[];
+        foreach($snapshot['crm_sites'] ?? [] as $site) {$q=$db->prepare('SELECT id,site_id FROM crm_shared_files WHERE site_id=?');$q->execute([$site['id']]);$bindings=[...$bindings,...$q->fetchAll()];}
+        $snapshot['_file_bindings']=$bindings;
+        $db->prepare('INSERT INTO crm_recycle_bin (id,domain,label,payload_json,deleted_by) VALUES (?,?,?,?,?)')->execute([crm_uuid(),isset($groups['crm_clients'])?'workspace':'inventory',mb_substr($label,0,250),json_encode($snapshot,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),(int)($_SESSION['user_id'] ?? 0)]);
+    }
 }
 
 function crm_column_exists(string $table, string $column): bool {
@@ -311,10 +323,10 @@ function crm_public_workspace(): array {
     $db = crm_db();
     $clients = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'name' => $row['display_name'], 'phone' => $row['phone'], 'email' => $row['email'],
-        'source' => $row['source'], 'notes' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true),
-    ], $db->query('SELECT id, display_name, phone, email, source, notes, created_at FROM crm_clients ORDER BY created_at')->fetchAll());
+        'hidden' => !empty($row['hidden_at']), 'source' => $row['source'], 'notes' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true),
+    ], $db->query('SELECT c.id,c.display_name,c.phone,c.email,c.source,c.notes,c.created_at,v.hidden_at FROM crm_clients c LEFT JOIN crm_client_visibility v ON v.client_id=c.id ORDER BY c.created_at')->fetchAll());
     $sites = array_map(static fn(array $row): array => [
-        'id' => $row['id'], 'clientId' => $row['client_id'], 'name' => $row['name'], 'address' => $row['address'],
+        'mergedInto' => crm_resolve_site((string)$row['id']) !== (string)$row['id'] ? crm_resolve_site((string)$row['id']) : '', 'id' => $row['id'], 'clientId' => $row['client_id'], 'name' => $row['name'], 'address' => $row['address'],
         'status' => $row['construction_status'], 'managerId' => $row['manager_employee_id'] ?: '', 'contractNumber' => $row['contract_number'],
         'plannedStart' => $row['planned_start'] ?: '', 'plannedFinish' => $row['planned_finish'] ?: '', 'actualStart' => $row['actual_start'] ?: '',
         'actualFinish' => $row['actual_finish'] ?: '', 'notes' => $row['construction_notes'] ?: '',
@@ -367,7 +379,7 @@ function crm_public_workspace(): array {
         $attachments = json_decode((string)($row['attachments_json'] ?? '[]'), true);
         $workflow = [];
         foreach (is_array($attachments) ? $attachments : [] as $entry) if (is_array($entry) && ($entry['kind'] ?? '') === 'workflow') $workflow = $entry;
-        return ['id' => $row['id'], 'siteId' => $row['site_id'] ?: '', 'taskId' => $row['task_id'] ?: '', 'type' => $row['activity_type'],
+        return ['id' => $row['id'], 'siteId' => $row['site_id'] ? crm_resolve_site((string)$row['site_id']) : '', 'taskId' => $row['task_id'] ?: '', 'type' => $row['activity_type'],
           'channel' => $row['channel'], 'direction' => $row['direction'], 'subject' => $row['subject'] ?: '',
           'externalKey' => $row['external_key'] === $row['id'] ? '' : ($row['external_key'] ?: ''), 'text' => $row['body'],
           'authorId' => $row['author_employee_id'] ?: '', 'authorName' => $row['author_name'] ?: '', 'createdAt' => crm_db_datetime($row['occurred_at'], true),
@@ -1042,7 +1054,7 @@ function crm_external_chat_for_site(string $channel,string $siteId): string {
 function crm_external_conversation_site(string $channel,string $chatId,string $name,string $title): string {
     $db=crm_db(); $kind=$channel.'_chat';
     $find=$db->prepare("SELECT site_id FROM crm_communications WHERE channel=? AND site_id IS NOT NULL AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind',?,'id',?)) LIMIT 1");
-    $find->execute([$channel,$kind,$chatId]); $linked=$find->fetchColumn(); if ($linked) return (string)$linked;
+    $find->execute([$channel,$kind,$chatId]); $linked=$find->fetchColumn(); if ($linked) return crm_resolve_site((string)$linked);
     $hash=hash('sha256',$channel.':'.$chatId);
     $uuid=static fn(string $seed):string => substr($seed,0,8).'-'.substr($seed,8,4).'-4'.substr($seed,13,3).'-a'.substr($seed,17,3).'-'.substr($seed,20,12);
     $siteId=$uuid($hash); $clientId=$uuid(hash('sha256','client:'.$hash)); $leadId=$uuid(hash('sha256','lead:'.$hash));
@@ -1051,7 +1063,7 @@ function crm_external_conversation_site(string $channel,string $chatId,string $n
         $db->beginTransaction();
         // A manual link may have been saved while waiting for the lock.
         $find->execute([$channel,$kind,$chatId]); $linked=$find->fetchColumn();
-        if ($linked) { $db->commit(); return (string)$linked; }
+        if ($linked) { $db->commit(); return crm_resolve_site((string)$linked); }
         $account=$db->query("SELECT id,employee_id FROM crm_users WHERE active=1 AND role IN ('owner','admin') ORDER BY role='owner' DESC,id LIMIT 1")->fetch();
         if (!$account) throw new RuntimeException('Нет администратора для новой заявки.');
         $owner=$account['employee_id'] ?: null; $source=$channel==='avito'?'Авито':'MAX';
@@ -1063,4 +1075,24 @@ function crm_external_conversation_site(string $channel,string $chatId,string $n
         $db->commit(); return $siteId;
     } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
     finally { $q=$db->prepare('SELECT RELEASE_LOCK(?)');$q->execute([$lock]); }
+}
+
+function crm_resolve_site(string $siteId): string {
+    $seen=[];while($siteId!=='' && !isset($seen[$siteId])) {$seen[$siteId]=true;$q=crm_db()->prepare('SELECT target_site_id FROM crm_site_aliases WHERE source_site_id=?');$q->execute([$siteId]);$next=$q->fetchColumn();if(!$next)break;$siteId=(string)$next;}return $siteId;
+}
+
+function crm_restore_recycled_record(string $id, array $user): void {
+    $db=crm_db();$db->beginTransaction();
+    try {
+        $q=$db->prepare('SELECT * FROM crm_recycle_bin WHERE id=? AND restored_at IS NULL FOR UPDATE');$q->execute([$id]);$bin=$q->fetch();if(!$bin)throw new RuntimeException('Запись уже восстановлена или не найдена');
+        if(!crm_can($user,$bin['domain']==='workspace'?'clients.manage':'procurement.manage'))throw new RuntimeException('Нет прав на восстановление');
+        $tables=['crm_clients','crm_sites','crm_construction_stages','crm_leads','crm_orders','crm_tasks','crm_communications','crm_logistics','crm_suppliers','crm_materials','crm_supply_needs','crm_purchases','crm_stock_documents','crm_tools','crm_tool_events'];
+        $payload=json_decode($bin['payload_json'],true,512,JSON_THROW_ON_ERROR);
+        foreach($tables as $table)foreach($payload[$table] ?? [] as $row) {
+            $columns=array_keys($row);foreach($columns as $column)if(!preg_match('/^[a-z_]+$/',$column))throw new RuntimeException('Неверный формат корзины');
+            $q=$db->prepare('INSERT INTO '.$table.' (`'.implode('`,`',$columns).'`) VALUES ('.implode(',',array_fill(0,count($columns),'?')).')');$q->execute(array_values($row));
+        }
+        foreach($payload['_file_bindings'] ?? [] as $file)$db->prepare('UPDATE crm_shared_files SET site_id=? WHERE id=? AND site_id IS NULL')->execute([$file['site_id'],$file['id']]);
+        $db->prepare('UPDATE crm_recycle_bin SET restored_at=NOW() WHERE id=?')->execute([$bin['id']]);$db->exec("UPDATE crm_settings SET setting_value=CAST(setting_value AS UNSIGNED)+1 WHERE setting_key IN ('workspace_revision','inventory_revision')");$db->commit();
+    } catch (Throwable $error) {if($db->inTransaction())$db->rollBack();throw $error;}
 }

@@ -26,6 +26,7 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
   const fileRef = useRef(null);
   const chatListRef = useRef(null);
   const chatNearBottom = useRef(true);
+  const focusedEvent=useRef('');
   const orders = useMemo(() => state.orders.filter((order) => order.siteId === site.id), [state.orders, site.id]);
   const orderIds = useMemo(() => new Set(orders.map((order) => order.id)), [orders]);
   const tasks = useMemo(() => state.tasks.filter((task) => orderIds.has(task.orderId)), [state.tasks, orderIds]);
@@ -34,8 +35,8 @@ export function ClientWorkspace({ state, lead, liveSession = false, currentEmplo
   const files = useMemo(() => liveSession ? serverAttachments.map((item) => ({ id: item.id, name: item.name, size: item.size, createdAt: item.createdAt, type: item.mime, url: crmApi.filesPreviewUrl(item.id), downloadUrl: crmApi.filesDownloadUrl(item.id) })) : attachments.map((item) => ({ id: item.id, name: item.name, size: item.size, createdAt: item.createdAt, type: item.type, url: item.dataUrl, downloadUrl: item.dataUrl })), [liveSession, serverAttachments, attachments]);
   const timeline = useMemo(() => [...events.map((item) => ({ kind: 'event', item })), ...files.map((item) => ({ kind: 'file', item }))].sort((a, b) => new Date(a.item.createdAt) - new Date(b.item.createdAt)), [events, files]);
   useEffect(() => { if (!liveSession) return undefined; let active = true; const refresh = () => { if (document.visibilityState === 'hidden') return; crmApi.filesList(site.id).then((result) => { if (active) setServerAttachments(result.files); }).catch(() => {}); }; refresh(); const timer = window.setInterval(refresh, 15000); window.addEventListener('focus', refresh); return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); }; }, [liveSession, site.id]);
-  useLayoutEffect(() => { if (focusEventId || !chatNearBottom.current || !chatListRef.current) return; chatListRef.current.scrollTop = chatListRef.current.scrollHeight; }, [timeline.length, site.id, focusEventId]);
-  useLayoutEffect(() => { if (!focusEventId || !chatListRef.current) return; const entry = [...chatListRef.current.children].find((item) => item.dataset.notificationEvent === focusEventId); entry?.scrollIntoView({ block: 'center' }); }, [focusEventId, timeline]);
+  useLayoutEffect(() => { if ((focusEventId && focusedEvent.current!==focusEventId) || !chatNearBottom.current || !chatListRef.current) return; chatListRef.current.scrollTop = chatListRef.current.scrollHeight; }, [timeline.length, site.id, focusEventId]);
+  useLayoutEffect(() => { if (!focusEventId || !chatListRef.current || focusedEvent.current===focusEventId) return; const entry = [...chatListRef.current.children].find((item) => item.dataset.notificationEvent === focusEventId); if(entry){entry.scrollIntoView({ block: 'center' });focusedEvent.current=focusEventId;} }, [focusEventId, timeline]);
   const stageIndex = Math.max(0, LEAD_STAGES.findIndex((stage) => stage.id === lead.status));
   const progress = lead.status === 'lost' ? 0 : Math.round(((stageIndex + 1) / (LEAD_STAGES.length - 1)) * 100);
   const brief = site.buildingBrief || {};
