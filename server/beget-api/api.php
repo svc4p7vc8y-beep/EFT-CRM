@@ -191,7 +191,7 @@ if ($action === 'connectors.max.webhook' && $method === 'POST') {
     $message = $update['message'] ?? null;
     if (!is_array($message) || !empty($message['sender']['is_bot'])) crm_json(['ok' => true]);
     $chatId = (string)($message['recipient']['chat_id'] ?? $update['chat_id'] ?? '');
-    $body = is_array($message['body'] ?? null) ? $message['body'] : [];
+    $body = crm_max_message_body($message);
     $text = trim((string)($body['text'] ?? ''));
     $mid = (string)($body['mid'] ?? '');
     $images = array_values(array_filter(is_array($body['attachments'] ?? null) ? $body['attachments'] : [], static fn($entry): bool => is_array($entry) && in_array($entry['type'] ?? '', ['image','file'],true)));

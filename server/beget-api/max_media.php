@@ -118,6 +118,22 @@ function crm_max_file_attachment(array $attachment): array {
 }
 
 
+function crm_max_message_body(array $message): array {
+    $body = is_array($message['body'] ?? null) ? $message['body'] : [];
+    // Forwarded documents live in link.message, rather than the outer body.
+    $forward = ($message['link']['type'] ?? '') === 'forward' && is_array($message['link']['message'] ?? null) ? $message['link']['message'] : [];
+    $attachments = array_merge((array)($body['attachments'] ?? []), (array)($forward['attachments'] ?? []));
+    $text = trim((string)($body['text'] ?? ''));
+    $forwardText = trim((string)($forward['text'] ?? ''));
+    if ($forwardText !== '' && $forwardText !== $text) $text = trim($text . "\n" . $forwardText);
+    foreach ($attachments as $attachment) {
+        if (($attachment['type'] ?? '') !== 'share') continue;
+        $url = (string)($attachment['payload']['url'] ?? '');
+        if (filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string)parse_url($url, PHP_URL_SCHEME)), ['http','https'], true) && !str_contains($text, $url)) $text = trim($text . "\n" . $url);
+    }
+    return array_merge($body, ['text'=>$text, 'attachments'=>$attachments]);
+}
+
 function crm_max_sync_files(array $config): array {
     $db=crm_db();$chats=[];
     foreach((array)($config['site_chat_ids'] ?? []) as $siteId=>$chatId)$chats[(string)$chatId]=(string)$siteId;
@@ -128,16 +144,16 @@ function crm_max_sync_files(array $config): array {
         $data=crm_http_get_json('https://platform-api2.max.ru/messages?chat_id='.rawurlencode((string)$chatId).'&count=100',['Authorization: '.$config['bot_token']]);
         foreach((array)($data['messages'] ?? []) as $message) {
             if(!is_array($message) || !empty($message['sender']['is_bot']))continue;
-            $body=(array)($message['body'] ?? []);$mid=(string)($body['mid'] ?? '');if($mid==='')continue;
-            $media=array_values(array_filter((array)($body['attachments'] ?? []),static fn($a)=>is_array($a)&&in_array($a['type'] ?? '',['file','image'],true)));if(!$media)continue;
-            $q=$db->prepare("SELECT id,site_id,attachments_json FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");$q->execute([$mid]);$existing=$q->fetch();
+            $body=crm_max_message_body($message);$mid=(string)($body['mid'] ?? '');if($mid==='')continue;
+            $media=array_values(array_filter((array)($body['attachments'] ?? []),static fn($a)=>is_array($a)&&in_array($a['type'] ?? '',['file','image'],true)));if(!$media && empty($message['link']) && !array_filter((array)($body['attachments'] ?? []),static fn($a)=>($a['type'] ?? '')==='share'))continue;
+            $q=$db->prepare("SELECT id,site_id,body,attachments_json FROM crm_communications WHERE channel='max' AND external_key=? LIMIT 1");$q->execute([$mid]);$existing=$q->fetch();
             $entries=$existing?(json_decode((string)$existing['attachments_json'],true) ?: []):[];
-            if(count(array_filter($entries,static fn($a)=>!empty($a['key'])))>=count($media))continue;
+            if($existing && count(array_filter($entries,static fn($a)=>!empty($a['key'])))>=count($media) && (string)$existing['body']===crm_text($body['text'] ?? '',20000))continue;
             $entries=array_values(array_filter($entries,static fn($a)=>!in_array($a['kind'] ?? '',['max_file_unavailable','max_image_unavailable'],true)));
             $stored=count(array_filter($entries,static fn($a)=>!empty($a['key'])));
             foreach(array_slice($media,$stored) as $a) {$file=($a['type'] ?? '')==='image'?crm_max_image_attachment($a):crm_max_file_attachment($a);$entries[]=$file;if(!empty($file['key']))$recovered++;else $failed++;}
             $sender=crm_text($message['sender']['name'] ?? $message['sender']['first_name'] ?? 'Клиент MAX',100);
-            if($existing)$db->prepare('UPDATE crm_communications SET attachments_json=? WHERE id=?')->execute([json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$existing['id']]);
+            if($existing)$db->prepare('UPDATE crm_communications SET attachments_json=?,body=? WHERE id=?')->execute([json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),crm_text($body['text'] ?? 'Файл из MAX',20000),$existing['id']]);
             else {
                 $target=$siteId ?: crm_external_conversation_site('max',(string)$chatId,$sender,'Обращение из MAX');
                 $entries[]=['kind'=>'max_chat','id'=>(string)$chatId];$entries[]=['kind'=>'sender','name'=>$sender];
