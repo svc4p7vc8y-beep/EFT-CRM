@@ -250,6 +250,7 @@ function crm_schema_ensure_v30(): void {
       PRIMARY KEY (id), UNIQUE KEY uq_crm_orders_number (public_number), KEY idx_crm_orders_site (site_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $columns = [
+        'crm_clients' => ['avito_avatar_url' => "VARCHAR(2048) NOT NULL DEFAULT ''"],
         'crm_leads' => [
             'owner_employee_id' => "CHAR(36) NULL AFTER owner_id",
             'owner_employee_ids_json' => 'JSON NULL AFTER owner_employee_id',
@@ -323,8 +324,8 @@ function crm_public_workspace(): array {
     $db = crm_db();
     $clients = array_map(static fn(array $row): array => [
         'id' => $row['id'], 'name' => $row['display_name'], 'phone' => $row['phone'], 'email' => $row['email'],
-        'hidden' => !empty($row['hidden_at']), 'source' => $row['source'], 'notes' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true),
-    ], $db->query('SELECT c.id,c.display_name,c.phone,c.email,c.source,c.notes,c.created_at,v.hidden_at FROM crm_clients c LEFT JOIN crm_client_visibility v ON v.client_id=c.id ORDER BY c.created_at')->fetchAll());
+        'avitoAvatar' => $row['avito_avatar_url'] ?? '', 'hidden' => !empty($row['hidden_at']), 'source' => $row['source'], 'notes' => $row['notes'], 'createdAt' => crm_db_datetime($row['created_at'], true),
+    ], $db->query('SELECT c.id,c.display_name,c.phone,c.email,c.source,c.notes,c.created_at,c.avito_avatar_url,v.hidden_at FROM crm_clients c LEFT JOIN crm_client_visibility v ON v.client_id=c.id ORDER BY c.created_at')->fetchAll());
     $sites = array_map(static fn(array $row): array => [
         'mergedInto' => crm_resolve_site((string)$row['id']) !== (string)$row['id'] ? crm_resolve_site((string)$row['id']) : '', 'id' => $row['id'], 'clientId' => $row['client_id'], 'name' => $row['name'], 'address' => $row['address'],
         'status' => $row['construction_status'], 'managerId' => $row['manager_employee_id'] ?: '', 'contractNumber' => $row['contract_number'],
@@ -632,10 +633,11 @@ function crm_workspace_save(array $workspace, array $user, int $baseRevision, bo
         $db->exec('DELETE FROM crm_leads');
         $db->exec('DELETE FROM crm_construction_stages');
         $db->exec('DELETE FROM crm_sites');
+        $previousAvatars=$db->query('SELECT id,avito_avatar_url FROM crm_clients')->fetchAll(PDO::FETCH_KEY_PAIR);
         $db->exec('DELETE FROM crm_clients');
-        $insertClient = $db->prepare('INSERT INTO crm_clients (id, display_name, phone, email, source, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $insertClient = $db->prepare('INSERT INTO crm_clients (id, display_name, phone, email, source, notes, created_by, created_at, avito_avatar_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($clients as $row) $insertClient->execute([
-            crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), crm_text($row['source'] ?? '',120), crm_text($row['notes'] ?? '',10000), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'),
+            crm_required_text($row['id'] ?? '', 'идентификатор клиента', 36), crm_required_text($row['name'] ?? '', 'клиент', 200), crm_text($row['phone'] ?? '', 60), crm_text($row['email'] ?? '', 190), crm_text($row['source'] ?? '',120), crm_text($row['notes'] ?? '',10000), (int)$user['id'], crm_sql_datetime($row['createdAt'] ?? '') ?? date('Y-m-d H:i:s'), $previousAvatars[$row['id']] ?? '',
         ]);
         $insertSite = $db->prepare('INSERT INTO crm_sites (id, client_id, name, address, construction_status, manager_employee_id, contract_number, planned_start, planned_finish, actual_start, actual_finish, construction_notes, building_brief_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($sites as $row) {
@@ -979,10 +981,7 @@ function crm_dispatch_message(string $channel, string $siteId, string $recipient
         if (empty($config['enabled'])) throw new RuntimeException('Сначала подключите Авито в настройках общения.');
         $chatId=$avitoChatId!==''?$avitoChatId:((string)($config['site_chat_ids'][$siteId] ?? '') ?: crm_external_chat_for_site('avito',$siteId));
         if ($chatId==='') throw new RuntimeException('У объекта нет привязанного диалога Авито.');
-        if ($files) throw new RuntimeException('Пока можно отправлять в Авито только текст.');
-        $result=crm_avito_send($config,$chatId,$body);
-        $id=(string)($result['id'] ?? '');
-        return ['status'=>'sent','externalKey'=>$id!==''?'avito-'.$id:''];
+        return crm_avito_delivery(crm_avito_send($config,$chatId,$body,$files));
     }
     return ['status' => 'saved', 'externalKey' => ''];
 }

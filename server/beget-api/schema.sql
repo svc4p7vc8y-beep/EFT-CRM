@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS crm_crew_members (
   CONSTRAINT fk_crm_crew_members_employee FOREIGN KEY (employee_id) REFERENCES crm_employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS crm_communication_shares (
+  token_hash CHAR(64) NOT NULL PRIMARY KEY,
+  file_key VARCHAR(80) NOT NULL,
+  file_name VARCHAR(220) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  KEY idx_communication_shares_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS crm_clients (
   id CHAR(36) NOT NULL,
   display_name VARCHAR(200) NOT NULL,

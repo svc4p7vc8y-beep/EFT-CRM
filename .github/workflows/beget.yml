@@ -41,12 +41,16 @@ jobs:
         run: composer install --working-dir=server/beget-api --no-dev --no-interaction --no-progress --optimize-autoloader
       - name: Check PHP API syntax
         run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Test Avito uploads and avatars
+        run: php tests/avito-outgoing.php
       - name: Test forwarded MAX documents
         run: php tests/max-message.php
       - name: Test recycle bin with isolated MySQL database
         env:
           CRM_TEST_DATABASE: eft_crm_test
-        run: php tests/lifecycle-db.php
+        run: |
+          php tests/lifecycle-db.php
+          php tests/communications-db.php
       - name: Build frontend for crm.eftsip.ru
         env:
           VITE_CRM_API_URL: /api/
@@ -56,7 +60,7 @@ jobs:
           mkdir -p release/api release/uploads/employees release/uploads/construction release/uploads/communications release/uploads/chat
           cp -R dist/. release/
           cp server/beget-root.htaccess.example release/.htaccess
-          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/avito.php server/beget-api/max_media.php server/beget-api/max_media_rescue.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
+          cp server/beget-api/index.php server/beget-api/api.php server/beget-api/bootstrap.php server/beget-api/chat.php server/beget-api/mail.php server/beget-api/avito.php server/beget-api/communications_check.php server/beget-api/max_media.php server/beget-api/max_media_rescue.php server/beget-api/push.php server/beget-api/notifications_cron.php server/beget-api/install.php server/beget-api/schema.sql release/api/
           cp -R server/beget-api/vendor release/api/vendor
           cp server/beget-api/.htaccess.example release/api/.htaccess
           cp server/uploads/employees/.htaccess release/uploads/employees/.htaccess
@@ -127,3 +131,13 @@ jobs:
             if [ "$attempt" -lt 3 ]; then sleep 15; fi
           done
           exit 1
+
+      - name: Check communication channels and refresh Avito avatars
+        env:
+          BEGET_SSH_HOST: ${{ secrets.CRM_BEGET_SSH_HOST }}
+          BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
+          BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
+        run: |
+          ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
+            "php8.2 '${BEGET_DEPLOY_PATH%/}/api/communications_check.php'"

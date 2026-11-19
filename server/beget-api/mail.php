@@ -216,7 +216,7 @@ function crm_mail_sync(array $config): array {
             if ($insert->rowCount() === 1) {
                 $imported++;
                 if ($siteId === null) $unassigned++;
-                elseif (!$ignored) crm_push_notify_site((string)$siteId, $eventId);
+                if (!$ignored) crm_push_notify_site((string)($siteId ?? ''), $eventId);
             }
         }
         $scanned = count($uids);

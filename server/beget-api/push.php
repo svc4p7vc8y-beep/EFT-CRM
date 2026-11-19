@@ -126,42 +126,49 @@ function crm_push_notify_lead_activity(string $siteId, string $eventId, string $
     }
     $owners = json_decode((string)($row['owner_employee_ids_json'] ?? '[]'), true);
     $employeeIds = array_values(array_unique(array_filter([...$recipientIds, ...(is_array($owners) ? $owners : []), $ownerId])));
+    $activeRecipients=[];
     if ($employeeIds) {
         $placeholders = implode(',', array_fill(0, count($employeeIds), '?'));
         $recipients = crm_db()->prepare("SELECT id FROM crm_users WHERE active=1 AND employee_id IN ($placeholders)");
         $recipients->execute($employeeIds);
-        foreach ($recipients->fetchAll(PDO::FETCH_COLUMN) as $userId) if ((int)$userId !== $authorUserId) crm_push_emit((int)$userId, 'message', $title, $body, $target, $eventKey);
+        foreach ($activeRecipients=$recipients->fetchAll(PDO::FETCH_COLUMN) as $userId) if ((int)$userId !== $authorUserId) crm_push_emit((int)$userId, 'message', $title, $body, $target, $eventKey);
     }
-    if (!$employeeIds) foreach (crm_db()->query("SELECT id FROM crm_users WHERE active=1 AND role IN ('owner','admin')")->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId,'message',$title,$body,$target,$eventKey);
+    if (!$activeRecipients) foreach (crm_db()->query("SELECT id FROM crm_users WHERE active=1 AND role IN ('owner','admin')")->fetchAll(PDO::FETCH_COLUMN) as $userId) crm_push_emit((int)$userId,'message',$title,$body,$target,$eventKey);
     $all = crm_db()->query('SELECT u.id,u.role FROM crm_users u JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1 AND (p.all_lead_messages_enabled=1 OR p.all_events_enabled=1)');
     foreach ($all->fetchAll() as $recipient) if ((int)$recipient['id'] !== $authorUserId && (crm_can($recipient, 'clients.view') || crm_can($recipient, 'clients.manage'))) crm_push_emit((int)$recipient['id'], 'message', $title, $body, $target, $eventKey);
 }
 
 function crm_push_notify_site(string $siteId, string $eventId): void {
+    $db=crm_db();
+    $q=$db->prepare('SELECT channel,direction,is_ignored,body,subject,attachments_json FROM crm_communications WHERE id=?');$q->execute([$eventId]);$event=$q->fetch();
+    if (!$event || $event['direction']!=='incoming' || $event['is_ignored']) return;
     $siteId=crm_resolve_site($siteId);
-    crm_db()->prepare("UPDATE crm_client_visibility v JOIN crm_sites s ON s.client_id=v.client_id JOIN crm_communications c ON c.id=? SET v.hidden_at=NULL WHERE s.id=? AND c.direction='incoming' AND c.occurred_at>=v.hidden_at")->execute([$eventId,$siteId]);
-    if ($siteId === '') return;
-    $lead = crm_db()->prepare('SELECT id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
-    $lead->execute([$siteId]);
-    if ($lead->fetchColumn()) {
-        crm_push_notify_lead_activity($siteId, $eventId, 'Новое сообщение клиента', 'Откройте заявку для ответа.');
-        return;
+    $channel=(string)$event['channel'];
+    $label=['email'=>'Почта','telegram'=>'Telegram','max'=>'MAX','avito'=>'Авито','whatsapp'=>'WhatsApp'][$channel] ?? $channel;
+    $title='Новое сообщение · '.$label;
+    $body=trim((string)$event['body']) ?: (trim((string)$event['subject']) ?: 'Новое вложение');
+    $target='#communications?message='.$eventId;$key='message:'.$eventId;
+    if ($siteId!=='') {
+        $db->prepare("UPDATE crm_client_visibility v JOIN crm_sites s ON s.client_id=v.client_id JOIN crm_communications c ON c.id=? SET v.hidden_at=NULL WHERE s.id=? AND c.direction='incoming' AND c.occurred_at>=v.hidden_at")->execute([$eventId,$siteId]);
+        $q=$db->prepare('SELECT id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');$q->execute([$siteId]);$lead=$q->fetchColumn();
+        if ($lead) {
+            $target='#client/'.rawurlencode((string)$lead);$key='lead-message:'.$eventId;
+            crm_push_notify_lead_activity($siteId,$eventId,$title,$body);
+        } else {
+            $q=$db->prepare('SELECT manager_employee_id FROM crm_sites WHERE id=?');$q->execute([$siteId]);$manager=(string)($q->fetchColumn() ?: '');
+            crm_push_emit_for_employee($manager,'message',$title,$body,$target,$key);
+            crm_push_emit_all('message',$title,$body,$target,$key);
+            $q=$db->prepare('SELECT 1 FROM crm_users WHERE employee_id=? AND active=1');$q->execute([$manager]);
+            if (!$q->fetchColumn()) foreach ($db->query("SELECT id FROM crm_users WHERE active=1 AND role IN ('owner','admin')")->fetchAll(PDO::FETCH_COLUMN) as $id) crm_push_emit((int)$id,'message',$title,$body,$target,$key);
+        }
+    } else {
+        $users=$db->query("SELECT u.id,u.role,p.all_lead_messages_enabled,p.all_events_enabled FROM crm_users u LEFT JOIN crm_notification_preferences p ON p.user_id=u.id WHERE u.active=1")->fetchAll();
+        foreach ($users as $user) if (crm_can_handle_unassigned($user,$channel) && (in_array($user['role'],['owner','admin'],true) || $user['all_lead_messages_enabled'] || $user['all_events_enabled'])) crm_push_emit((int)$user['id'],'message',$title,$body,$target,$key);
     }
-    $statement = crm_db()->prepare('SELECT manager_employee_id FROM crm_sites WHERE id=?');
-    $statement->execute([$siteId]);
-    $employeeId = (string)($statement->fetchColumn() ?: '');
-    $assigned = false;
-    if ($employeeId !== '') {
-        $check = crm_db()->prepare('SELECT 1 FROM crm_users WHERE employee_id=? AND active=1 LIMIT 1');
-        $check->execute([$employeeId]);
-        $assigned = (bool)$check->fetchColumn();
+    if ($channel==='max') {
+        $config=crm_integration_config('max');$ids=array_map('intval',(array)($config['notification_user_ids'] ?? []));
+        foreach ($db->query('SELECT id,role FROM crm_users WHERE active=1')->fetchAll() as $user) if (in_array((int)$user['id'],$ids,true) && crm_can($user,'clients.manage')) crm_push_emit((int)$user['id'],'message',$title,$body,$target,$key);
     }
-    if (!$assigned) {
-        $statement = crm_db()->prepare('SELECT owner_employee_id FROM crm_leads WHERE site_id=? ORDER BY created_at DESC LIMIT 1');
-        $statement->execute([$siteId]);
-        $employeeId = (string)($statement->fetchColumn() ?: '');
-    }
-    crm_push_emit_for_employee($employeeId, 'message', 'Новое сообщение клиента', 'Откройте Центр общения для ответа.', '#communications', 'message:' . $eventId);
 }
 
 function crm_push_due_reminders(): int {

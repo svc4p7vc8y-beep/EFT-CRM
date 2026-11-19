@@ -36,16 +36,38 @@ function crm_avito_chat_id(string $value): string {
 
 function crm_avito_chat_metadata(array $chat, string $accountId): array {
     $name = 'Собеседник Авито';
-    foreach ((array)($chat['users'] ?? []) as $participant) if (is_array($participant) && (string)($participant['id'] ?? '') !== $accountId && trim((string)($participant['name'] ?? '')) !== '') { $name=crm_text($participant['name'],100); break; }
+    $avatar = '';
+    foreach ((array)($chat['users'] ?? []) as $participant) {
+        if (!is_array($participant) || (string)($participant['id'] ?? '') === $accountId) continue;
+        if (trim((string)($participant['name'] ?? '')) !== '') $name=crm_text($participant['name'],100);
+        $photo = (array)($participant['public_user_profile']['avatar'] ?? []);
+        foreach ([$photo['images']['256x256'] ?? '', $photo['default'] ?? '', ...array_values((array)($photo['images'] ?? []))] as $candidate) {
+            $avatar = crm_avito_avatar_url($candidate);
+            if ($avatar !== '') break;
+        }
+        break;
+    }
     $ad = is_array($chat['context']['value'] ?? null) ? $chat['context']['value'] : [];
     $url = (string)($ad['url'] ?? '');
     if (!preg_match('~^https://(?:www\.)?avito\.ru/~i',$url)) $url = '';
-    return ['sender'=>$name,'adTitle'=>crm_text($ad['title'] ?? '',200),'adUrl'=>$url,'itemId'=>crm_text($ad['id'] ?? '',30)];
+    return ['sender'=>$name,'avatar'=>$avatar,'adTitle'=>crm_text($ad['title'] ?? '',200),'adUrl'=>$url,'itemId'=>crm_text($ad['id'] ?? '',30)];
+}
+
+function crm_avito_avatar_url(mixed $value): string {
+    if (!is_string($value) || strlen($value)>2048) return '';
+    $parts=parse_url($value);
+    if (!$parts || ($parts['scheme'] ?? '')!=='https' || isset($parts['user']) || isset($parts['pass']) || (isset($parts['port']) && $parts['port']!==443)) return '';
+    return preg_match('/(^|\.)(avito\.ru|avito\.st|avito\.net)$/i',(string)($parts['host'] ?? '')) ? $value : '';
 }
 
 function crm_avito_refresh_contact(string $siteId,array $meta,string $chatId): bool {
     if($siteId==='')return false;
     $db=crm_db();$changed=false;$sender=trim((string)($meta['sender'] ?? ''));$title=trim((string)($meta['adTitle'] ?? ''));
+    $avatar=crm_avito_avatar_url($meta['avatar'] ?? '');
+    if ($avatar!=='') {
+        $q=$db->prepare('UPDATE crm_clients c JOIN crm_sites s ON s.client_id=c.id SET c.avito_avatar_url=? WHERE s.id=? AND c.avito_avatar_url<>?');
+        $q->execute([$avatar,$siteId,$avatar]);$changed=$changed || $q->rowCount()>0;
+    }
     if($sender!=='' && !in_array($sender,['Клиент Авито','Собеседник Авито','Авито'],true)) {
         $q=$db->prepare("UPDATE crm_clients c JOIN crm_sites s ON s.client_id=c.id SET c.display_name=? WHERE s.id=? AND c.display_name IN ('Клиент Авито','Собеседник Авито','Авито','')");$q->execute([$sender,$siteId]);$changed=$changed || $q->rowCount()>0;
     }
@@ -100,12 +122,15 @@ function crm_avito_media(array $content): array {
 function crm_avito_import_message(array $config, string $chatId, array $message, array $metadata = []): bool {
     $id = (string)($message['id'] ?? '');
     if ($id === '' || strlen($id) > 200 || !preg_match('/^[A-Za-z0-9_-]+$/',$id)) return false;
+    $sentQuery=crm_db()->prepare("SELECT id FROM crm_communications WHERE channel='avito' AND direction='outgoing' AND JSON_CONTAINS(attachments_json,JSON_OBJECT('kind','avito_sent','id',?)) LIMIT 1");
+    $sentQuery->execute([$id]);if($sentQuery->fetchColumn())return false;
     $existingQuery=crm_db()->prepare('SELECT id,attachments_json FROM crm_communications WHERE external_key=? LIMIT 1');
     $existingQuery->execute(['avito-'.$id]); $existing=$existingQuery->fetch();
     $oldEntries=$existing ? (json_decode((string)$existing['attachments_json'],true) ?: []) : [];
     $mappedSite=(string)($config['chat_site_ids'][$chatId] ?? '');
     if ($mappedSite === '') $mappedSite=crm_external_conversation_site('avito',$chatId,(string)($metadata['sender'] ?? 'Клиент Авито'),(string)($metadata['adTitle'] ?? ''));
     $mappedSite=crm_resolve_site($mappedSite);
+    crm_avito_refresh_contact($mappedSite,$metadata,$chatId);
     if ($existing && array_filter($oldEntries,static fn($entry)=>($entry['kind'] ?? '')==='avito_media')) return false;
     $direction = ($message['direction'] ?? 'in') === 'out' ? 'outgoing' : 'incoming';
     $content = is_array($message['content'] ?? null) ? $message['content'] : [];
@@ -138,7 +163,7 @@ function crm_avito_import_message(array $config, string $chatId, array $message,
     $eventId = crm_uuid();
     $statement->execute([$eventId,$site,$direction,$externalKey,crm_text($metadata['adTitle'] ?? '',200),$body,$direction==='outgoing'?1:0,json_encode($attachments,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),'delivered',date('Y-m-d H:i:s',$created)]);
     if ($statement->rowCount() && $direction === 'incoming') {
-        try { if ($site) crm_push_notify_site((string)$site,$eventId); } catch (Throwable $error) { error_log('EFT CRM Avito push failed: '.$error->getMessage()); }
+        try { crm_push_notify_site((string)($site ?: ''),$eventId); } catch (Throwable $error) { error_log('EFT CRM Avito push failed: '.$error->getMessage()); }
     }
     return $statement->rowCount() > 0;
 }
@@ -168,13 +193,70 @@ function crm_avito_sync(array $config, int $chatLimit = 30): array {
     return ['chats'=>$processed,'imported'=>$imported,'contactsUpdated'=>$contactUpdates];
 }
 
-function crm_avito_send(array $config, string $chatId, string $text): array {
+function crm_avito_send(array $config, string $chatId, string $text, array $files = []): array {
     $accountId=(string)($config['account_id'] ?? '');
     if (!preg_match('/^\d{1,20}$/',$accountId)) throw new RuntimeException('Не указан профиль Авито.');
     $chatId=crm_avito_chat_id($chatId);
     if (mb_strlen($text)>1000) throw new RuntimeException('Ответ в Авито должен быть не длиннее 1000 символов.');
     $token=crm_avito_token($config);
-    return crm_avito_request($token,'POST','/messenger/v1/accounts/'.$accountId.'/chats/'.rawurlencode($chatId).'/messages',['type'=>'text','message'=>['text'=>$text]]);
+    return crm_avito_send_parts($accountId,$chatId,$text,$files,
+        static fn(string $path,array $body): array => crm_avito_request($token,'POST',$path,$body),
+        static fn(array $file): string => crm_avito_upload_image($token,$accountId,$file),
+        'crm_avito_share_file');
+}
+
+/** Each accepted provider id is retained, including partial failures. */
+function crm_avito_send_parts(string $accountId,string $chatId,string $text,array $files,callable $request,callable $upload,callable $share): array {
+    $base='/messenger/v1/accounts/'.$accountId.'/chats/'.rawurlencode($chatId).'/messages';
+    $ids=[];$error='';
+    try {
+        // Prepare attachments before sending anything to avoid a text-only partial send on upload failure.
+        $parts=[];
+        if (trim($text)!=='') $parts[]=['path'=>$base,'body'=>['type'=>'text','message'=>['text'=>$text]]];
+        foreach ($files as $file) {
+            if (in_array($file['mime'] ?? '',['image/jpeg','image/png','image/webp'],true)) $parts[]=['path'=>$base.'/image','body'=>['image_id'=>$upload($file)]];
+            else {
+                $link=$share($file);
+                $label=mb_substr((string)($file['name'] ?? 'Документ'),0,220);
+                $parts[]=['path'=>$base,'body'=>['type'=>'text','message'=>['text'=>$label."\n".$link."\nСсылка на скачивание действует 30 дней."]]];
+            }
+        }
+        if (!$parts) throw new RuntimeException('Добавьте текст или вложение.');
+        foreach ($parts as $part) {
+            $sent=$request($part['path'],$part['body']);
+            $id=(string)($sent['id'] ?? '');
+            if ($id==='') throw new RuntimeException('Авито не подтвердил отправку сообщения.');
+            $ids[]=$id;
+        }
+    } catch (Throwable $failure) { $error=($ids?'Отправлено частей: '.count($ids).'. Остальное не отправлено. ':'').$failure->getMessage(); }
+    return ['id'=>$ids[0] ?? '', 'sentIds'=>$ids, 'error'=>$error];
+}
+
+function crm_avito_upload_image(string $token,string $accountId,array $file): string {
+    $curl=curl_init('https://api.avito.ru/messenger/v1/accounts/'.$accountId.'/uploadImages');
+    if ($curl===false) throw new RuntimeException('Не удалось подготовить загрузку фото в Авито.');
+    curl_setopt_array($curl,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>60,
+        CURLOPT_HTTPHEADER=>['Authorization: Bearer '.$token,'Accept: application/json'],
+        CURLOPT_POSTFIELDS=>['uploadfile[]'=>new CURLFile($file['path'],$file['mime'],$file['name'])]]);
+    $raw=curl_exec($curl);$status=(int)curl_getinfo($curl,CURLINFO_RESPONSE_CODE);curl_close($curl);
+    $data=is_string($raw)?json_decode($raw,true):null;
+    if ($status<200 || $status>=300 || !is_array($data) || !$data) throw new RuntimeException('Авито не принял фото (код '.($status ?: 'соединения').').');
+    $id=(string)array_key_first($data);
+    if (!preg_match('/^[A-Za-z0-9_-]{1,200}$/',$id) || !is_array($data[$id])) throw new RuntimeException('Авито вернул неизвестный формат загруженного фото.');
+    return $id;
+}
+
+function crm_avito_share_file(array $file): string {
+    $key=basename((string)$file['path']);
+    if (!preg_match('/^m-[a-f0-9]{32}\.(pdf|txt|zip|docx|xlsx)$/',$key)) throw new RuntimeException('Этот тип файла нельзя отправить ссылкой.');
+    $token=bin2hex(random_bytes(32));
+    crm_db()->prepare('INSERT INTO crm_communication_shares (token_hash,file_key,file_name,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 30 DAY))')->execute([hash('sha256',$token),$key,(string)$file['name']]);
+    return 'https://crm.eftsip.ru/api/api.php?action=communications.shared&token='.$token;
+}
+
+function crm_avito_delivery(array $result): array {
+    return ['status'=>empty($result['error'])?'sent':'error','externalKey'=>!empty($result['id'])?'avito-'.$result['id']:'',
+        'error'=>$result['error'] ?? '', 'sentIds'=>$result['sentIds'] ?? []];
 }
 
 function crm_avito_greeting_settings(): array {
@@ -189,7 +271,7 @@ function crm_avito_greet_new_chat(array $config,string $chatId,array $message,ar
     $claim='avito-greeting:'.substr(hash('sha256',$chatId),0,40);
     $q=$db->prepare('INSERT IGNORE INTO crm_settings (setting_key,setting_value) VALUES (?,?)');$q->execute([$claim,'sending']);if(!$q->rowCount())return;
     $text=(string)$settings['text'];$status='sent';$error='';$external=$claim;
-    try { $sent=crm_avito_send($config,$chatId,$text);$external=!empty($sent['id'])?'avito-'.$sent['id']:$claim; }
+    try { $sent=crm_avito_send($config,$chatId,$text);if(!empty($sent['error']))throw new RuntimeException($sent['error']);$external=!empty($sent['id'])?'avito-'.$sent['id']:$claim; }
     catch(Throwable $failure) { $status='error';$error=crm_text($failure->getMessage(),1000); }
     $entries=[['kind'=>'avito_chat','id'=>$chatId],['kind'=>'auto_greeting'],['kind'=>'sender','name'=>'ЭФТ']];
     $db->prepare("INSERT IGNORE INTO crm_communications (id,site_id,activity_type,channel,direction,external_key,subject,body,is_read,attachments_json,delivery_status,delivery_error,occurred_at) VALUES (?,?,'message','avito','outgoing',?,'Приветствие ЭФТ',?,1,?,?,?,NOW())")->execute([crm_uuid(),$rows[0]['site_id'],$external,$text,json_encode($entries,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$status,$error]);
