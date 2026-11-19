@@ -20,7 +20,7 @@ try {
     $db->prepare("INSERT INTO crm_leads (id,site_id,public_number,owner_employee_id,notes) VALUES (?,?,'NOTIFY-1',?,'')")->execute([$lead,$site,$employees[0]]);
     foreach (['avito','max','email','telegram','whatsapp'] as $channel) {
         $id=crm_uuid();
-        $db->prepare("INSERT INTO crm_communications (id,site_id,activity_type,channel,direction,body,attachments_json,occurred_at) VALUES (?,?,'message',?,'incoming','Attachment message','[]',NOW())")->execute([$id,$site,$channel]);
+        $db->prepare("INSERT INTO crm_communications (id,site_id,activity_type,channel,direction,external_key,body,attachments_json,occurred_at) VALUES (?,?,'message',?,'incoming',?,'Attachment message','[]',NOW())")->execute([$id,$site,$channel,$id]);
         crm_push_notify_site($site,$id);crm_push_notify_site($site,$id);
         $q=$db->prepare('SELECT user_id,target_path FROM crm_notifications WHERE event_key=?');$q->execute(['lead-message:'.$id]);$rows=$q->fetchAll();
         $ids=array_map('intval',array_column($rows,'user_id'));
@@ -30,7 +30,7 @@ try {
         $db->prepare('DELETE FROM crm_notifications WHERE event_key=?')->execute(['lead-message:'.$id]);crm_push_notify_site($site,$id);
         $q->execute(['lead-message:'.$id]);if($q->fetch())throw new RuntimeException('Ignored message notified');
     }
-    $id=crm_uuid();$db->prepare("INSERT INTO crm_communications (id,activity_type,channel,direction,body,attachments_json,occurred_at) VALUES (?,'message','email','incoming','No client','[]',NOW())")->execute([$id]);crm_push_notify_site('',$id);
+    $id=crm_uuid();$db->prepare("INSERT INTO crm_communications (id,activity_type,channel,direction,external_key,body,attachments_json,occurred_at) VALUES (?,'message','email','incoming',?,'No client','[]',NOW())")->execute([$id,$id]);crm_push_notify_site('',$id);
     $q=$db->prepare('SELECT user_id FROM crm_notifications WHERE event_key=?');$q->execute(['message:'.$id]);$ids=array_map('intval',$q->fetchAll(PDO::FETCH_COLUMN));
     if(!in_array($users[0],$ids,true) || in_array($users[2],$ids,true))throw new RuntimeException('Unassigned inbox access failed');
     crm_avito_refresh_contact($site,['avatar'=>'https://www.avito.st/photo.png'],'chat');
