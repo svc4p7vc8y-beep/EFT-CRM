@@ -48,3 +48,5 @@ $report['push']=['activeDevices'=>(int)crm_db()->query('SELECT COUNT(*) FROM crm
     'pending'=>(int)crm_db()->query('SELECT COUNT(*) FROM crm_notifications WHERE push_sent_at IS NULL AND push_attempts<3')->fetchColumn(),
     'failed'=>(int)crm_db()->query('SELECT COUNT(*) FROM crm_notifications WHERE push_sent_at IS NULL AND push_attempts>=3')->fetchColumn()];
 echo json_encode($report,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT)."\n";
+
+foreach ($report as $name=>$check) echo '::notice::CRM '.$name.': '.json_encode($check,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n";

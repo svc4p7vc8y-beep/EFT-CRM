@@ -6,7 +6,7 @@ $configPath=__DIR__.'/../server/beget-api/config.local.php';
 if (is_file($configPath)) throw new RuntimeException('Refusing to replace existing configuration');
 file_put_contents($configPath,"<?php return ".var_export(['db_host'=>'127.0.0.1','db_name'=>'eft_crm_test','db_user'=>'root','db_password'=>'root','app_secret'=>str_repeat('t',40)],true).';');
 try {
- require __DIR__.'/../server/beget-api/bootstrap.php';
+ require __DIR__.'/../server/beget-api/bootstrap.php';restore_exception_handler();
  crm_schema_ensure_v30();$db=crm_db();
  $db->exec("INSERT INTO crm_users (username,display_name,password_hash,role) VALUES ('fixture','Fixture','unused','owner')");
  $uid=(int)$db->lastInsertId();$_SESSION=['user_id'=>$uid];$user=['id'=>$uid,'role'=>'owner'];
@@ -28,4 +28,4 @@ try {
  $alias=crm_uuid();$db->prepare('INSERT INTO crm_site_aliases VALUES (?,?)')->execute([$alias,$site]);
  if(crm_resolve_site($alias)!==$site)throw new RuntimeException('Merged site resolution failed');
  echo "Recycle bin restoration, file preservation, conflict rollback and alias checks passed\n";
-} finally {unlink($configPath);}
+} catch(Throwable $failure) {echo '::error::Lifecycle fixture: '.str_replace(["\r","\n"],' ',$failure->getMessage())." at line ".$failure->getLine()."\n";throw $failure;} finally {unlink($configPath);}

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 if (getenv('CRM_TEST_DATABASE')!=='eft_crm_test') throw new RuntimeException('Isolated database required');
 $configPath=__DIR__.'/../server/beget-api/config.local.php';
-if (is_file($configPath)) throw new RuntimeException('Refusing existing configuration');
+if (is_file($configPath)) { echo "::error::Communication test configuration unexpectedly exists\n";throw new RuntimeException('Refusing existing configuration'); }
 file_put_contents($configPath,'<?php return '.var_export(['db_host'=>'127.0.0.1','db_name'=>'eft_crm_test','db_user'=>'root','db_password'=>'root','app_secret'=>str_repeat('t',40)],true).';');
 try {
     require __DIR__.'/../server/beget-api/bootstrap.php';require __DIR__.'/../server/beget-api/avito.php';
