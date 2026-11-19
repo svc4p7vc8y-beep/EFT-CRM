@@ -35,10 +35,14 @@ jobs:
           BEGET_SSH_USER: ${{ secrets.CRM_BEGET_SSH_USER }}
           BEGET_DEPLOY_PATH: ${{ secrets.CRM_BEGET_DEPLOY_PATH }}
         run: |
-          : "${BEGET_SSH_HOST:?Missing CRM_BEGET_SSH_HOST}"
-          : "${BEGET_SSH_USER:?Missing CRM_BEGET_SSH_USER}"
-          : "${BEGET_DEPLOY_PATH:?Missing CRM_BEGET_DEPLOY_PATH}"
-          [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]
+          for name in BEGET_SSH_HOST BEGET_SSH_USER BEGET_DEPLOY_PATH; do
+            if [[ -z "${!name}" ]]; then echo "::error::Notification scheduler: missing setting ${name}"; exit 1; fi
+          done
+          if ! [[ "$BEGET_DEPLOY_PATH" = "." || "$BEGET_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+            echo '::error::Notification scheduler: deployment directory must be an absolute path or a dot'
+            exit 1
+          fi
+          trap 'echo "::error::Notification scheduler could not complete its SSH command"' ERR
           ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
             "bash -s -- '${BEGET_DEPLOY_PATH%/}/api'" <<'REMOTE'
