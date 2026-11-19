@@ -15,7 +15,7 @@ try {
     }
     $db->prepare('INSERT INTO crm_notification_preferences (user_id,all_events_enabled) VALUES (?,1)')->execute([$users[1]]);
     $client=crm_uuid();$site=crm_uuid();$lead=crm_uuid();
-    $db->prepare("INSERT INTO crm_clients (id,display_name,notes) VALUES (?,'Photo client','')")->execute([$client]);
+    $db->prepare("INSERT INTO crm_clients (id,display_name,notes,created_by) VALUES (?,'Photo client','',?)")->execute([$client,$users[0]]);
     $db->prepare("INSERT INTO crm_sites (id,client_id,name) VALUES (?,?,'House')")->execute([$site,$client]);
     $db->prepare("INSERT INTO crm_leads (id,site_id,public_number,owner_employee_id,notes) VALUES (?,?,'NOTIFY-1',?,'')")->execute([$lead,$site,$employees[0]]);
     foreach (['avito','max','email','telegram','whatsapp'] as $channel) {

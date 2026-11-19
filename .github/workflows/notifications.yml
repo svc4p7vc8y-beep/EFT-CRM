@@ -44,13 +44,13 @@ jobs:
             "bash -s -- '${BEGET_DEPLOY_PATH%/}/api'" <<'REMOTE'
           set -e
           cd "$1"
-          for binary in /usr/local/bin/php8.4 /usr/local/bin/php8.3 /usr/local/bin/php8.2 /usr/local/bin/php8.1 /usr/local/php-cgi/8.4/bin/php /usr/local/php-cgi/8.3/bin/php /usr/local/php-cgi/8.2/bin/php /usr/local/php-cgi/8.1/bin/php; do
+          for binary in "$(command -v php8.4 || true)" "$(command -v php8.3 || true)" "$(command -v php8.2 || true)" /usr/bin/php8.4 /usr/bin/php8.3 /usr/bin/php8.2 /usr/local/bin/php8.4 /usr/local/bin/php8.3 /usr/local/bin/php8.2 /usr/local/bin/php8.1 /usr/local/php-cgi/8.4/bin/php /usr/local/php-cgi/8.3/bin/php /usr/local/php-cgi/8.2/bin/php /usr/local/php-cgi/8.1/bin/php; do
             if test -x "$binary"; then
               "$binary" -r 'exit(PHP_VERSION_ID >= 80100 ? 0 : 1);' || continue
               "$binary" -d display_errors=1 notifications_cron.php
               exit 0
             fi
           done
-          echo 'PHP 8.1+ CLI interpreter is unavailable on Beget' >&2
+          echo '::error::PHP 8.1+ CLI interpreter for scheduled notifications is unavailable' >&2
           exit 1
           REMOTE
