@@ -38,4 +38,7 @@ try {
     $q=$db->prepare('SELECT avito_avatar_url FROM crm_clients WHERE id=?');$q->execute([$client]);if($q->fetchColumn()!=='https://www.avito.st/photo.png')throw new RuntimeException('Avatar missing');
     $public=crm_public_workspace();$found=array_values(array_filter($public['clients'],static fn($c)=>$c['id']===$client));if(($found[0]['avitoAvatar'] ?? '')!=='https://www.avito.st/photo.png')throw new RuntimeException('Avatar not exposed to UI');
     echo "All channel notifications: recipients, preferences, deduplication, deep links, ignored messages, unassigned email and Avito avatar persistence passed\n";
+} catch (Throwable $failure) {
+    echo '::error::Communications fixture: '.str_replace(["\r","\n"], ' ', $failure->getMessage())." at line ".$failure->getLine()."\n";
+    throw $failure;
 } finally { unlink($configPath); }
