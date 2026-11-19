@@ -30,7 +30,7 @@ foreach (['mail','telegram','max','avito'] as $channel) {
                 file_put_contents($temporary,base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='));
                 crm_avito_upload_image($token,$account,['path'=>$temporary,'mime'=>'image/png','name'=>'eft-upload-check.png']);
                 $report[$channel]['imageUpload']=true;
-            } catch(Throwable $failure) { $report[$channel]['imageUpload']=false; }
+            } catch(Throwable $failure) { $report[$channel]['imageUpload']=false;$report[$channel]['uploadError']=$failure->getMessage(); }
             finally { if(is_file($temporary))unlink($temporary); }
             $chats=crm_avito_request($token,'GET','/messenger/v2/accounts/'.$account.'/chats?limit=100&offset=0');$updated=0;
             foreach ($chats['chats'] ?? [] as $chat) {

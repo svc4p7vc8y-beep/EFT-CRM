@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS crm_tasks (
   assignee_id CHAR(36) NULL,
   assignee_ids_json JSON NULL,
   crew_id CHAR(36) NULL,
+  construction_stage_id CHAR(36) NULL,
   status ENUM('planned','doing','review','blocked','done') NOT NULL DEFAULT 'planned',
   priority ENUM('normal','high') NOT NULL DEFAULT 'normal',
   due_at DATETIME NULL,
