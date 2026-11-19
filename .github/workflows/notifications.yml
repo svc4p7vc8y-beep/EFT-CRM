@@ -42,10 +42,21 @@ jobs:
             echo '::error::Notification scheduler: deployment directory must be an absolute path or a dot'
             exit 1
           fi
-          trap 'echo "::error::Notification scheduler could not complete its SSH command"' ERR
+          report_failure() {
+            reason='remote command failed'
+            error_file="$RUNNER_TEMP/eft-notifications.stderr"
+            if grep -qi 'Permission denied' "$error_file"; then reason='SSH authentication rejected';
+            elif grep -qi 'Host key verification failed' "$error_file"; then reason='SSH server key verification failed';
+            elif grep -qi 'Connection refused' "$error_file"; then reason='SSH connection refused';
+            elif grep -qi 'timed out' "$error_file"; then reason='SSH connection timed out';
+            elif grep -qi 'Could not resolve hostname' "$error_file"; then reason='SSH host could not be resolved';
+            elif grep -qi 'No such file or directory' "$error_file"; then reason='server directory or PHP binary missing'; fi
+            echo "::error::Notification scheduler: $reason"
+          }
+          trap report_failure ERR
           ssh -p 22 -i ~/.ssh/beget_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${BEGET_SSH_USER}@${BEGET_SSH_HOST}" \
-            "bash -s -- '${BEGET_DEPLOY_PATH%/}/api'" <<'REMOTE'
+            "bash -s -- '${BEGET_DEPLOY_PATH%/}/api'" 2> "$RUNNER_TEMP/eft-notifications.stderr" <<'REMOTE'
           set -e
           cd "$1"
           for binary in "$(command -v php8.4 || true)" "$(command -v php8.3 || true)" "$(command -v php8.2 || true)" /usr/bin/php8.4 /usr/bin/php8.3 /usr/bin/php8.2 /usr/local/bin/php8.4 /usr/local/bin/php8.3 /usr/local/bin/php8.2 /usr/local/bin/php8.1 /usr/local/php-cgi/8.4/bin/php /usr/local/php-cgi/8.3/bin/php /usr/local/php-cgi/8.2/bin/php /usr/local/php-cgi/8.1/bin/php; do
